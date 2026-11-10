@@ -1,0 +1,20 @@
+config_version=5
+
+[application]
+
+config/name="LeanCLR Godot POC"
+run/main_scene="res://demo.tscn"
+config/features=PackedStringArray("4.4")
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+
+[leanclr]
+
+hot_reload/on_unsafe="fallback"
+
+[rendering]
+
+textures/vram_compression/import_etc2_astc=true
