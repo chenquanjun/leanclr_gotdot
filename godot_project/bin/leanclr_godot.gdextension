@@ -1,0 +1,23 @@
+[configuration]
+
+entry_symbol = "leanclr_godot_init"
+compatibility_minimum = "4.4"
+reloadable = false
+
+[libraries]
+
+windows.debug.x86_64 = "res://bin/leanclr_godot.dll"
+windows.release.x86_64 = "res://bin/leanclr_godot.release.dll"
+linux.debug.x86_64 = "res://bin/leanclr_godot.so"
+linux.release.x86_64 = "res://bin/leanclr_godot.release.so"
+android.debug.x86_64 = "res://bin/android/x86_64/libleanclr_godot.so"
+android.release.x86_64 = "res://bin/android/x86_64/libleanclr_godot.release.so"
+android.debug.arm64-v8a = "res://bin/android/arm64-v8a/libleanclr_godot.so"
+android.release.arm64-v8a = "res://bin/android/arm64-v8a/libleanclr_godot.release.so"
+android.debug.armeabi-v7a = "res://bin/android/armeabi-v7a/libleanclr_godot.so"
+android.release.armeabi-v7a = "res://bin/android/armeabi-v7a/libleanclr_godot.release.so"
+; Godot 4.x 的架构 feature tag：arm64 = arm64-v8a，arm32 = armeabi-v7a
+android.debug.arm64 = "res://bin/android/arm64-v8a/libleanclr_godot.so"
+android.release.arm64 = "res://bin/android/arm64-v8a/libleanclr_godot.release.so"
+android.debug.arm32 = "res://bin/android/armeabi-v7a/libleanclr_godot.so"
+android.release.arm32 = "res://bin/android/armeabi-v7a/libleanclr_godot.release.so"
