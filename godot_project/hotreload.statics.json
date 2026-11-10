@@ -1,0 +1,14 @@
+{
+  "statics": [
+    "LeanClrGame!HotState::counter",
+    "LeanClrGame!HotState::tag",
+    "LeanClrGameDemo!GameDemo::s_score",
+    "LeanClrGameDemo!GameDemo::s_timeLeft",
+    "LeanClrGameDemo!GameDemo::s_state",
+    "LeanClrGameDemo!GameDemo::s_playerX",
+    "LeanClrGameDemo!GameDemo::s_playerY",
+    "LeanClrGameDemo!GameDemo::s_targetX",
+    "LeanClrGameDemo!GameDemo::s_targetY",
+    "LeanClrGameDemo!GameDemo::s_hits"
+  ]
+}

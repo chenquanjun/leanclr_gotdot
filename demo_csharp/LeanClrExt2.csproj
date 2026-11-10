@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>LeanClrExt2</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../godot_project/hotreload_tmp</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+    <BaseIntermediateOutputPath>obj/ext2/</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>obj/ext2/</IntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="LeanClrExt2.cs" />
+    <Reference Include="LeanClrExt">
+      <HintPath>../godot_project/hotreload_tmp/LeanClrExt.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

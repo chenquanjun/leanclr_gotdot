@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>LeanClrCycleB</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../godot_project/hotreload_tmp/cycle/b</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+    <BaseIntermediateOutputPath>obj/cycle_b/</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>obj/cycle_b/</IntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="LeanClrCycleB.cs" />
+    <Reference Include="LeanClrCycleA">
+      <HintPath>../godot_project/hotreload_tmp/cycle/v1/LeanClrCycleA.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

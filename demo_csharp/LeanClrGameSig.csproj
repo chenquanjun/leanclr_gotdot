@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>LeanClrGame</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../godot_project/hotreload_tmp/sig/$(SigVariant)</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+    <DefineConstants>HOT_V2;$(SigVariant)</DefineConstants>
+    <BaseIntermediateOutputPath>obj/sig_$(SigVariant)/</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>obj/sig_$(SigVariant)/</IntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="LeanClrGame.cs" />
+  </ItemGroup>
+</Project>
