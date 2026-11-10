@@ -1,0 +1,6 @@
+[submodule "native/thirdparty/leanclr"]
+	path = native/thirdparty/leanclr
+	url = https://github.com/focus-creative-games/leanclr.git
+[submodule "native/thirdparty/godot-cpp"]
+	path = native/thirdparty/godot-cpp
+	url = https://github.com/godotengine/godot-cpp.git

@@ -1,0 +1,1085 @@
+diff --git a/src/runtime/alloc/metadata_allocation.h b/src/runtime/alloc/metadata_allocation.h
+index c978978..7c7a5c8 100644
+--- a/src/runtime/alloc/metadata_allocation.h
++++ b/src/runtime/alloc/metadata_allocation.h
+@@ -15,6 +15,12 @@ class MetadataAllocation
+         s_memPool = new MemPool();
+     }
+ 
++    static void destroy()
++    {
++        delete s_memPool;
++        s_memPool = nullptr;
++    }
++
+     static void* malloc(size_t size)
+     {
+         return s_memPool->malloc_zeroed(size);
+diff --git a/src/runtime/gc/garbage_collector.h b/src/runtime/gc/garbage_collector.h
+index afe5684..3af3a1a 100644
+--- a/src/runtime/gc/garbage_collector.h
++++ b/src/runtime/gc/garbage_collector.h
+@@ -37,6 +37,11 @@ class GarbageCollector
+         GcHeapImpl::initialize(config);
+     }
+ 
++    static void shutdown()
++    {
++        GcHeapImpl::shutdown();
++    }
++
+     static void collect()
+     {
+         GcHeapImpl::collect();
+diff --git a/src/runtime/gc/gc_finalizer.cpp b/src/runtime/gc/gc_finalizer.cpp
+index e46dab5..aa521eb 100644
+--- a/src/runtime/gc/gc_finalizer.cpp
++++ b/src/runtime/gc/gc_finalizer.cpp
+@@ -141,5 +141,11 @@ void GcFinalizer::on_object_freed(vm::RtObject* obj)
+     s_registry.erase(obj);
+ }
+ 
++void GcFinalizer::reset()
++{
++    s_registry.clear();
++    s_freachable.clear();
++}
++
+ } // namespace gc
+ } // namespace leanclr
+diff --git a/src/runtime/gc/gc_finalizer.h b/src/runtime/gc/gc_finalizer.h
+index 1ffeceb..bed2356 100644
+--- a/src/runtime/gc/gc_finalizer.h
++++ b/src/runtime/gc/gc_finalizer.h
+@@ -18,6 +18,7 @@ class GcFinalizer
+     static void suppress_finalize(vm::RtObject* obj);
+     static void reregister_for_finalize(vm::RtObject* obj);
+     static void on_object_freed(vm::RtObject* obj);
++    static void reset();
+ };
+ 
+ } // namespace gc
+diff --git a/src/runtime/gc/gc_roots.cpp b/src/runtime/gc/gc_roots.cpp
+index b2141e4..e86ec72 100644
+--- a/src/runtime/gc/gc_roots.cpp
++++ b/src/runtime/gc/gc_roots.cpp
+@@ -39,6 +39,12 @@ void GcRoots::register_visit_object_roots(GcVisitObjectRootsScan scan)
+     s_visit_object_roots.push_back(scan);
+ }
+ 
++void GcRoots::clear()
++{
++    s_registered_slots.clear();
++    s_visit_object_roots.clear();
++}
++
+ struct GcMarkContext
+ {
+     GCAliveObjectBitmap& alive_object_bitmap;
+diff --git a/src/runtime/gc/gc_roots.h b/src/runtime/gc/gc_roots.h
+index 55d4ab2..5f8c130 100644
+--- a/src/runtime/gc/gc_roots.h
++++ b/src/runtime/gc/gc_roots.h
+@@ -25,6 +25,7 @@ class GcRoots
+     static void register_slot(vm::RtObject** slot);
+     static void unregister_slot(vm::RtObject** slot);
+     static void register_visit_object_roots(GcVisitObjectRootsScan scan);
++    static void clear();
+     static void foreach_root(GCAliveObjectBitmap& alive_object_bitmap);
+ };
+ 
+diff --git a/src/runtime/gc/mark_sweep/mark_sweep_heap.cpp b/src/runtime/gc/mark_sweep/mark_sweep_heap.cpp
+index 78470ae..bb858e1 100644
+--- a/src/runtime/gc/mark_sweep/mark_sweep_heap.cpp
++++ b/src/runtime/gc/mark_sweep/mark_sweep_heap.cpp
+@@ -155,6 +155,27 @@ void MarkSweepHeap::initialize(const Config& config)
+     initialize_size_class_pools();
+ }
+ 
++void MarkSweepHeap::shutdown()
++{
++    for (size_t i = 0; i < kSizeClassPoolCount; ++i)
++    {
++        delete s_size_class_pools[i];
++        s_size_class_pools[i] = nullptr;
++    }
++    for (size_t i = 0; i < kMaxSmallObejctSize / 8; ++i)
++    {
++        s_map_div8_size_to_pool[i] = nullptr;
++    }
++    for (auto it = s_big_object_arenas.begin(); it != s_big_object_arenas.end(); ++it)
++    {
++        alloc::GeneralAllocation::free(*it);
++    }
++    s_big_object_arenas.clear();
++    s_used_bytes = 0;
++    s_heap_bytes = 0;
++    s_collection_count = 0;
++}
++
+ void MarkSweepHeap::collect()
+ {
+     if (s_gc_mode == GCMode::DISABLED)
+diff --git a/src/runtime/gc/mark_sweep/mark_sweep_heap.h b/src/runtime/gc/mark_sweep/mark_sweep_heap.h
+index dd5e4ff..9311623 100644
+--- a/src/runtime/gc/mark_sweep/mark_sweep_heap.h
++++ b/src/runtime/gc/mark_sweep/mark_sweep_heap.h
+@@ -24,6 +24,7 @@ class MarkSweepHeap
+     };
+ 
+     static void initialize(const Config& config);
++    static void shutdown();
+     static void collect();
+     static bool maybe_collect();
+     static bool should_collect(bool force);
+diff --git a/src/runtime/gc/mark_sweep/small_heap_arena.h b/src/runtime/gc/mark_sweep/small_heap_arena.h
+index 8803aa6..62d4ea2 100644
+--- a/src/runtime/gc/mark_sweep/small_heap_arena.h
++++ b/src/runtime/gc/mark_sweep/small_heap_arena.h
+@@ -80,6 +80,15 @@ class SizeClassPool
+   public:
+     SizeClassPool(size_t arena_size, size_t block_size, size_t block_alignment);
+ 
++    ~SizeClassPool()
++    {
++        for (size_t i = 0; i < _arenas.size(); ++i)
++        {
++            delete _arenas[i];
++        }
++        _arenas.clear();
++    }
++
+     void* allocate_block();
+     void sweep(const GCAliveObjectBitmap& alive_object_bitmap, int64_t& freed_bytes);
+     size_t block_size() const
+diff --git a/src/runtime/metadata/metadata_cache.cpp b/src/runtime/metadata/metadata_cache.cpp
+index ab4e7c4..cf64807 100644
+--- a/src/runtime/metadata/metadata_cache.cpp
++++ b/src/runtime/metadata/metadata_cache.cpp
+@@ -225,6 +225,16 @@ void MetadataCache::initialize()
+     g_corlib_type_sigs.valuetype_by_ref = RtTypeSig::new_by_ref(RtElementType::ValueType);
+ }
+ 
++void MetadataCache::reset()
++{
++    g_genericInstCache.clear();
++    g_genericClassCache.clear();
++    g_ptrTypesigCache.clear();
++    g_szarrayTypesigCache.clear();
++    g_arrayTypesigCache.clear();
++    g_genericMethodCache.clear();
++}
++
+ const RtGenericParam* MetadataCache::get_unspecific_generic_param(uint32_t index, bool is_method)
+ {
+     assert(index < RT_MAX_GENERIC_PARAM_COUNT);
+diff --git a/src/runtime/metadata/metadata_cache.h b/src/runtime/metadata/metadata_cache.h
+index 499e684..cc9282c 100644
+--- a/src/runtime/metadata/metadata_cache.h
++++ b/src/runtime/metadata/metadata_cache.h
+@@ -17,6 +17,7 @@ class MetadataCache
+ {
+   public:
+     static void initialize();
++    static void reset();
+ 
+     // Corlib and pooled helpers
+     static const RtGenericParam* get_unspecific_generic_param(uint32_t index, bool is_method);
+diff --git a/src/runtime/metadata/module_def.cpp b/src/runtime/metadata/module_def.cpp
+index d3ae063..1b9cb4d 100644
+--- a/src/runtime/metadata/module_def.cpp
++++ b/src/runtime/metadata/module_def.cpp
+@@ -22,9 +22,11 @@ constexpr EncodedTokenId RtToken::Invalid;
+ 
+ // Helper constants
+ 
++static uint32_t g_next_image_id = 1;
++
+ static uint32_t allocate_image_id()
+ {
+-    static uint32_t next_id = 1;
++    uint32_t& next_id = g_next_image_id;
+     if (next_id >= MAX_ASSEMBLY_ID_COUNT)
+     {
+         // Exhausted all available IDs
+@@ -77,6 +79,13 @@ void RtModuleDef::unregister_module_def(RtModuleDef* moduleDef)
+     g_loadedModuleDefs[id - 1] = nullptr;
+ }
+ 
++void RtModuleDef::clear_modules()
++{
++    g_loadedModuleDefs.clear();
++    g_corlibModule = nullptr;
++    g_next_image_id = 1;
++}
++
+ void RtModuleDef::get_registered_modules(utils::Vector<metadata::RtModuleDef*>& modules)
+ {
+     for (metadata::RtModuleDef* mod : g_loadedModuleDefs)
+@@ -119,6 +128,42 @@ RtModuleDef* RtModuleDef::get_corlib_module()
+     return g_corlibModule;
+ }
+ 
++bool RtModuleDef::references_assembly(const char* name_no_ext) const
++{
++    if (name_no_ext == nullptr)
++    {
++        return false;
++    }
++    for (uint32_t i = 1; i <= _referenceAssemblyCount; ++i)
++    {
++        const ReferenceAssembly& ref_asm = _referenceAssemblies[i - 1];
++        if (ref_asm.status == AssemblyResolveStatus::Success && ref_asm.assembly != nullptr)
++        {
++            const RtModuleDef* ref_mod = ref_asm.assembly->mod;
++            if (ref_mod != nullptr && strcmp(ref_mod->get_name_no_ext(), name_no_ext) == 0)
++            {
++                return true;
++            }
++            continue;
++        }
++        auto row = _cliImage.read_assembly_ref(i);
++        if (!row)
++        {
++            continue;
++        }
++        auto name_ret = get_string(row.value().name);
++        if (name_ret.is_err())
++        {
++            continue;
++        }
++        if (strcmp(name_ret.unwrap(), name_no_ext) == 0)
++        {
++            return true;
++        }
++    }
++    return false;
++}
++
+ RtResult<const char*> RtModuleDef::get_string(uint32_t index) const
+ {
+     const CliHeap& heap = _cliImage.get_string_heap();
+diff --git a/src/runtime/metadata/module_def.h b/src/runtime/metadata/module_def.h
+index ddbb744..546e1ea 100644
+--- a/src/runtime/metadata/module_def.h
++++ b/src/runtime/metadata/module_def.h
+@@ -114,11 +114,15 @@ class RtModuleDef
+ 
+     static void register_module_def(RtModuleDef* moduleDef);
+     static void unregister_module_def(RtModuleDef* moduleDef);
++    static void clear_modules();
+     static void get_registered_modules(utils::Vector<metadata::RtModuleDef*>& modules);
+     static RtModuleDef* find_module(const char* name);
+     static RtModuleDef* get_module_by_id(uint32_t id);
+     static RtModuleDef* get_corlib_module();
+ 
++    // Whether another loaded module references the given assembly (used by hot reload safety check).
++    bool references_assembly(const char* name_no_ext) const;
++
+     RtAssembly* get_assembly() const
+     {
+         return _assembly;
+diff --git a/src/runtime/metadata/pdb_image.h b/src/runtime/metadata/pdb_image.h
+index 8f5d56a..7966583 100644
+--- a/src/runtime/metadata/pdb_image.h
++++ b/src/runtime/metadata/pdb_image.h
+@@ -34,6 +34,12 @@ class PdbImage
+ 
+     RtResultVoid load();
+ 
++    // Raw image data, used to release the PDB buffer on module unload.
++    const uint8_t* get_raw_image_data() const
++    {
++        return _cli_image.get_image_data();
++    }
++
+     void add_ir2il_map_for_method(const RtMethodInfo* method_info, const MethodIR2ILMapInfo& map_info);
+     void get_debug_info_for_method(const RtMethodInfo* method_info, int32_t ir_offset, int32_t* il_offset, const char** file_name, int32_t* line_number,
+                                    int32_t* column_number);
+diff --git a/src/runtime/platform/rt_sys.cpp b/src/runtime/platform/rt_sys.cpp
+index 0ddff8d..be82531 100644
+--- a/src/runtime/platform/rt_sys.cpp
++++ b/src/runtime/platform/rt_sys.cpp
+@@ -658,6 +658,16 @@ uint8_t* RtSys::str_error_r(int32_t error, uint8_t* buffer, int32_t buffer_size)
+         std::snprintf(out, static_cast<size_t>(buffer_size), "%s", msg);
+     }
+     return buffer;
++#elif defined(__ANDROID__)
++    // Bionic 的 strerror_r 返回 char*（GNU 风格），不是 POSIX 的 int。
++    char* msg = ::strerror_r(error, out, static_cast<size_t>(buffer_size));
++    if (msg == nullptr)
++        return nullptr;
++    if (msg != out)
++    {
++        std::snprintf(out, static_cast<size_t>(buffer_size), "%s", msg);
++    }
++    return buffer;
+ #else
+     int rc = ::strerror_r(error, out, static_cast<size_t>(buffer_size));
+     if (rc != 0)
+diff --git a/src/runtime/vm/appdomain.cpp b/src/runtime/vm/appdomain.cpp
+index aa3b9c3..66ee4be 100644
+--- a/src/runtime/vm/appdomain.cpp
++++ b/src/runtime/vm/appdomain.cpp
+@@ -161,6 +161,13 @@ void AppDomain::get_modules(RtAppDomain* this_domain, utils::Vector<metadata::Rt
+     metadata::RtModuleDef::get_registered_modules(modules);
+ }
+ 
++void AppDomain::shutdown()
++{
++    g_appdomain_private_data.clear();
++    g_default_mono_domain = {};
++    g_default_appdomain = nullptr;
++}
++
+ static void visit_appdomain_private_data(gc::GcVisitObjectRoot visit, void* userdata)
+ {
+     for (utils::HashMap<utils::Utf16StrWithLen, RtObject*, utils::Utf16StrHasher, utils::Utf16StrCompare>::const_iterator it = g_appdomain_private_data.begin();
+diff --git a/src/runtime/vm/appdomain.h b/src/runtime/vm/appdomain.h
+index e49cc0a..eae9df6 100644
+--- a/src/runtime/vm/appdomain.h
++++ b/src/runtime/vm/appdomain.h
+@@ -13,6 +13,7 @@ class AppDomain
+   public:
+     static RtResult<RtAppDomain*> init_default_app_domain();
+     static RtResultVoid initialize_context();
++    static void shutdown();
+ 
+     static RtAppDomain* get_default_appdomain();
+     static RtMonoAppDomain* get_default_mono_appdomain();
+diff --git a/src/runtime/vm/array_class.cpp b/src/runtime/vm/array_class.cpp
+index a1040d5..1507728 100644
+--- a/src/runtime/vm/array_class.cpp
++++ b/src/runtime/vm/array_class.cpp
+@@ -577,6 +577,36 @@ RtResultVoid ArrayClass::initialize()
+     RET_VOID_OK();
+ }
+ 
++void ArrayClass::shutdown()
++{
++    g_arrayClassMap.clear();
++    g_arrayGenericMethodCache.clear();
++    g_icollectionGenericMethods.clear();
++    g_ienumerableGenericMethods.clear();
++    g_ireadonlyCollectionGenericMethods.clear();
++    g_ireadonlyListGenericMethods.clear();
++    g_ilistGenericMethods.clear();
++}
++
++void ArrayClass::remove_module_classes(const metadata::RtModuleDef* module_def)
++{
++    if (module_def == nullptr)
++    {
++        return;
++    }
++    for (auto it = g_arrayClassMap.begin(); it != g_arrayClassMap.end();)
++    {
++        const metadata::RtClass* array_class = it->second;
++        if (array_class != nullptr && array_class->element_class != nullptr && array_class->element_class->image == module_def)
++        {
++            it = g_arrayClassMap.erase(it);
++            continue;
++        }
++        ++it;
++    }
++    g_arrayGenericMethodCache.clear();
++}
++
+ void ArrayClass::walk_array_classes(metadata::ClassWalkCallback callback, void* userData)
+ {
+     for (auto& entry : g_arrayClassMap)
+diff --git a/src/runtime/vm/array_class.h b/src/runtime/vm/array_class.h
+index b42a937..0912b01 100644
+--- a/src/runtime/vm/array_class.h
++++ b/src/runtime/vm/array_class.h
+@@ -12,6 +12,9 @@ class ArrayClass
+   public:
+     // Static initializer
+     static RtResultVoid initialize();
++    static void shutdown();
++    // Hot reload: drop only array classes whose element class belongs to the given module.
++    static void remove_module_classes(const metadata::RtModuleDef* module_def);
+ 
+     // Array class creation functions
+     static RtResult<metadata::RtClass*> get_array_class_from_element_type(const metadata::RtTypeSig* ele_type, uint8_t rank);
+diff --git a/src/runtime/vm/assembly.cpp b/src/runtime/vm/assembly.cpp
+index e46c78a..747ef68 100644
+--- a/src/runtime/vm/assembly.cpp
++++ b/src/runtime/vm/assembly.cpp
+@@ -14,6 +14,10 @@
+ #include "class.h"
+ #include "reflection.h"
+ #include "type.h"
++#include "array_class.h"
++#include "generic_method.h"
++#include "metadata/metadata_cache.h"
++#include "gc/garbage_collector.h"
+ #include "log/internal_logger.h"
+ 
+ namespace leanclr
+@@ -86,6 +90,90 @@ RtResult<metadata::RtAssembly*> Assembly::load_by_name(RtAppDomain* app_domain,
+     return load_by_name(name_no_ext);
+ }
+ 
++static RtResultVoid unload_module_impl(const char* name_no_ext, bool check_references)
++{
++    if (name_no_ext == nullptr)
++    {
++        RET_ERR(RtErr::ArgumentNull);
++    }
++    metadata::RtModuleDef* mod = metadata::RtModuleDef::find_module(name_no_ext);
++    if (mod == nullptr)
++    {
++        RET_ERR(RtErr::FileNotFound);
++    }
++    if (mod->is_corlib())
++    {
++        RET_ERR(RtErr::InvalidOperation);
++    }
++
++    // Cross-module references block single-module unload; the caller decides the fallback policy.
++    // Group unload skips this check because all members (including cyclic referrers) are removed.
++    if (check_references)
++    {
++        utils::Vector<metadata::RtModuleDef*> modules;
++        metadata::RtModuleDef::get_registered_modules(modules);
++        for (metadata::RtModuleDef* other : modules)
++        {
++            if (other != nullptr && other != mod && other->references_assembly(name_no_ext))
++            {
++                RET_ERR(RtErr::InvalidOperation);
++            }
++        }
++    }
++
++    // First GC pass: clear objects reachable only from managed object fields.
++    gc::GarbageCollector::collect();
++
++    // Release static roots of the module, then drop all lazily rebuildable caches.
++    Class::remove_static_data_for_module(mod);
++    Class::clear_caches_for_module_unload();
++    ArrayClass::remove_module_classes(mod);
++    Reflection::shutdown();
++    GenericMethod::shutdown();
++    metadata::MetadataCache::reset();
++
++    // Second GC pass: objects held only by static fields are now unreachable; klass is still valid.
++    gc::GarbageCollector::collect();
++
++    metadata::RtAssembly* ass = mod->get_assembly();
++    alloc::MemPool* pool = &mod->get_mem_pool();
++    metadata::PdbImage* pdb = mod->get_pdb_image();
++    const uint8_t* image_data = mod->get_cli_image().get_image_data();
++    const uint8_t* pdb_data = pdb != nullptr ? pdb->get_raw_image_data() : nullptr;
++
++    metadata::RtModuleDef::unregister_module_def(mod);
++    alloc::GeneralAllocation::delete_any(mod);
++    if (pdb != nullptr)
++    {
++        alloc::GeneralAllocation::delete_any(pdb);
++    }
++    if (ass != nullptr)
++    {
++        alloc::GeneralAllocation::free(ass);
++    }
++    if (image_data != nullptr)
++    {
++        alloc::GeneralAllocation::free(const_cast<uint8_t*>(image_data));
++    }
++    if (pdb_data != nullptr)
++    {
++        alloc::GeneralAllocation::free(const_cast<uint8_t*>(pdb_data));
++    }
++    alloc::GeneralAllocation::delete_any(pool);
++
++    RET_VOID_OK();
++}
++
++RtResultVoid Assembly::unload_module(const char* name_no_ext)
++{
++    return unload_module_impl(name_no_ext, true);
++}
++
++RtResultVoid Assembly::unload_module_unchecked(const char* name_no_ext)
++{
++    return unload_module_impl(name_no_ext, false);
++}
++
+ RtResult<metadata::RtAssembly*> Assembly::load_from_data(const AssemblyData& dll_data, const AssemblyData* symbol_data_ptr)
+ {
+     utils::ScopeGuard cleanup_guard;
+diff --git a/src/runtime/vm/assembly.h b/src/runtime/vm/assembly.h
+index f867ead..3c1a1a1 100644
+--- a/src/runtime/vm/assembly.h
++++ b/src/runtime/vm/assembly.h
+@@ -29,6 +29,13 @@ class Assembly
+     static RtResult<metadata::RtAssembly*> load_from_data(const AssemblyData& dll_data, const AssemblyData* symbol_data_ptr);
+     static RtResult<metadata::RtAssembly*> load_from_data(RtAppDomain* app_domain, RtArray* dll_data, RtArray* symbol_data, RtObject* evidence, bool ref_only);
+ 
++    // Hot reload: unload a single module and release its pool, metadata and raw image data.
++    static RtResultVoid unload_module(const char* name_no_ext);
++    // Hot reload: unload a module of a reference group whose members are all going to be unloaded.
++    // Skips the cross-module reference check; the caller must guarantee no module outside the group
++    // references this assembly.
++    static RtResultVoid unload_module_unchecked(const char* name_no_ext);
++
+     static RtResult<RtArray*> get_types(metadata::RtAssembly* assembly, bool exported_only);
+ };
+ } // namespace vm
+diff --git a/src/runtime/vm/class.cpp b/src/runtime/vm/class.cpp
+index dbcef4c..0807315 100644
+--- a/src/runtime/vm/class.cpp
++++ b/src/runtime/vm/class.cpp
+@@ -1,6 +1,7 @@
+ #include <functional>
+ 
+ #include "class.h"
++
+ #include "const_strs.h"
+ #include "rt_managed_types.h"
+ #include "metadata/module_def.h"
+@@ -2607,6 +2608,47 @@ bool Class::is_subclass_of_initialized(const metadata::RtClass* from_class, cons
+     }
+ }
+ 
++void Class::remove_static_data_for_module(const metadata::RtModuleDef* module_def)
++{
++    if (module_def == nullptr)
++    {
++        return;
++    }
++    for (size_t i = 0; i < s_all_classes_with_static_data.size();)
++    {
++        const metadata::RtClass* klass = s_all_classes_with_static_data[i];
++        if (klass != nullptr && klass->image == module_def)
++        {
++            if (klass->static_fields_data != nullptr)
++            {
++                alloc::GeneralAllocation::free(klass->static_fields_data);
++            }
++            s_all_classes_with_static_data[i] = s_all_classes_with_static_data.back();
++            s_all_classes_with_static_data.pop_back();
++            continue;
++        }
++        ++i;
++    }
++}
++
++void Class::clear_caches_for_module_unload()
++{
++    g_ptrClassCache.clear();
++    g_genericParamClassCache.clear();
++    g_fnPtrClassCache.clear();
++    g_genericParameterCovariantCheckCache.clear();
++}
++
++void Class::shutdown()
++{
++    s_all_classes_with_static_data.clear();
++    g_ptrClassCache.clear();
++    g_genericParamClassCache.clear();
++    g_fnPtrClassCache.clear();
++    g_genericParameterCovariantCheckCache.clear();
++    g_corlibTypes = {};
++}
++
+ void Class::walk_ptr_classes(metadata::ClassWalkCallback callback, void* userData)
+ {
+     for (auto& entry : g_ptrClassCache)
+diff --git a/src/runtime/vm/class.h b/src/runtime/vm/class.h
+index b7b9a2b..c346871 100644
+--- a/src/runtime/vm/class.h
++++ b/src/runtime/vm/class.h
+@@ -123,6 +123,10 @@ class Class
+ {
+   public:
+     static RtResultVoid initialize();
++    static void shutdown();
++    // Hot reload: release static data of the given module and drop rebuildable caches.
++    static void remove_static_data_for_module(const metadata::RtModuleDef* module_def);
++    static void clear_caches_for_module_unload();
+     static RtResultVoid init_corlib_classes(metadata::RtModuleDef* corlib);
+ 
+     static const CorLibTypes& get_corlib_types()
+diff --git a/src/runtime/vm/environment.cpp b/src/runtime/vm/environment.cpp
+index f7d91af..1aff37c 100644
+--- a/src/runtime/vm/environment.cpp
++++ b/src/runtime/vm/environment.cpp
+@@ -41,6 +41,14 @@ void Environment::shutdown()
+     s_shutdown = true;
+ }
+ 
++void Environment::reset()
++{
++    s_exit_code = 0;
++    s_shutdown = false;
++    g_cmdline_args = nullptr;
++    s_environment_variables_map.clear();
++}
++
+ bool Environment::has_shutdown_started()
+ {
+     return s_shutdown;
+diff --git a/src/runtime/vm/environment.h b/src/runtime/vm/environment.h
+index 0a7b539..60d0304 100644
+--- a/src/runtime/vm/environment.h
++++ b/src/runtime/vm/environment.h
+@@ -24,6 +24,7 @@ class Environment
+     static int32_t get_exit_code();
+     static void set_exit_code(int32_t code);
+     static void shutdown();
++    static void reset();
+     static bool has_shutdown_started();
+ 
+     static RtResult<RtString*> get_machine_name();
+diff --git a/src/runtime/vm/gc.cpp b/src/runtime/vm/gc.cpp
+index 866e17e..3a98f64 100644
+--- a/src/runtime/vm/gc.cpp
++++ b/src/runtime/vm/gc.cpp
+@@ -3,6 +3,7 @@
+ #include "settings.h"
+ #include "gc/garbage_collector.h"
+ #include "gc/gc_finalizer.h"
++#include "gc/gc_roots.h"
+ 
+ namespace leanclr
+ {
+@@ -49,6 +50,13 @@ void GC::initialize()
+     register_all_gc_roots();
+ }
+ 
++void GC::shutdown()
++{
++    gc::GcFinalizer::reset();
++    gc::GcRoots::clear();
++    gc::GarbageCollector::shutdown();
++}
++
+ vm::RtObject* GC::get_ephemeron_tombstone()
+ {
+     return AppDomain::get_ephemeron_tombstone();
+diff --git a/src/runtime/vm/gc.h b/src/runtime/vm/gc.h
+index cf20c9e..dd4b40e 100644
+--- a/src/runtime/vm/gc.h
++++ b/src/runtime/vm/gc.h
+@@ -12,6 +12,7 @@ class GC
+ {
+   public:
+     static void initialize();
++    static void shutdown();
+     static vm::RtObject* get_ephemeron_tombstone();
+     static void register_ephemeron_array(vm::RtObject* arr);
+     static int32_t get_collection_count(int32_t generation);
+diff --git a/src/runtime/vm/gchandle.cpp b/src/runtime/vm/gchandle.cpp
+index 7affd3c..92fb128 100644
+--- a/src/runtime/vm/gchandle.cpp
++++ b/src/runtime/vm/gchandle.cpp
+@@ -244,5 +244,16 @@ void GCHandle::sweep_weak_handles(bool (*is_object_marked)(vm::RtObject*, void*
+     }
+ }
+ 
++void GCHandle::reset()
++{
++    for (auto it = s_handle_map.begin(); it != s_handle_map.end(); ++it)
++    {
++        alloc::GeneralAllocation::free(it->second);
++    }
++    s_handle_map.clear();
++    s_freed_handle_head = nullptr;
++    s_last_handle_id = 0;
++}
++
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/gchandle.h b/src/runtime/vm/gchandle.h
+index 568e060..cf3b4b0 100644
+--- a/src/runtime/vm/gchandle.h
++++ b/src/runtime/vm/gchandle.h
+@@ -26,6 +26,7 @@ class GCHandle
+     static bool is_type_pinned(const metadata::RtClass* klass);
+     static void foreach_strong_handles(void (*callback)(vm::RtObject*, void*), void* userData);
+     static void sweep_weak_handles(bool (*is_object_marked)(vm::RtObject*, void* ctx), void* ctx);
++    static void reset();
+ };
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/generic_method.cpp b/src/runtime/vm/generic_method.cpp
+index f4ba46d..f98fbbf 100644
+--- a/src/runtime/vm/generic_method.cpp
++++ b/src/runtime/vm/generic_method.cpp
+@@ -177,5 +177,10 @@ RtResult<const RtMethodInfo*> GenericMethod::get_method_from_pooled_generic_meth
+     RET_OK(new_method);
+ }
+ 
++void GenericMethod::shutdown()
++{
++    g_method_map.clear();
++}
++
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/generic_method.h b/src/runtime/vm/generic_method.h
+index cd18a84..4e88b77 100644
+--- a/src/runtime/vm/generic_method.h
++++ b/src/runtime/vm/generic_method.h
+@@ -15,6 +15,7 @@ class GenericMethod
+ 
+     // Get inflated method from pooled generic method
+     static RtResult<const metadata::RtMethodInfo*> get_method_from_pooled_generic_method(const metadata::RtGenericMethod* genericMethod);
++    static void shutdown();
+ };
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/internal_calls.cpp b/src/runtime/vm/internal_calls.cpp
+index 02334ad..22f0c0d 100644
+--- a/src/runtime/vm/internal_calls.cpp
++++ b/src/runtime/vm/internal_calls.cpp
+@@ -19,6 +19,15 @@ static utils::HashMap<const char*, InternalCallInvoker, utils::CStrHasher, utils
+ static utils::Vector<InternalCallInvoker> g_internalCallInvokerIdList;
+ static utils::HashMap<InternalCallInvoker, uint16_t> g_internalCallInvokerIdMap;
+ 
++void InternalCalls::shutdown()
++{
++    g_liteInternalCallMap.clear();
++    g_internalCallMap.clear();
++    g_newobjInternalCallMap.clear();
++    g_internalCallInvokerIdList.clear();
++    g_internalCallInvokerIdMap.clear();
++}
++
+ void InternalCalls::register_lite_internal_call(const char* name, ManagedMethodPointer func)
+ {
+     assert(g_liteInternalCallMap.find(name) == g_liteInternalCallMap.end() && "Lite internal call already registered");
+diff --git a/src/runtime/vm/internal_calls.h b/src/runtime/vm/internal_calls.h
+index d6f0db4..6aafbac 100644
+--- a/src/runtime/vm/internal_calls.h
++++ b/src/runtime/vm/internal_calls.h
+@@ -44,6 +44,7 @@ class InternalCalls
+   public:
+     // Initialize internal calls
+     static void initialize();
++    static void shutdown();
+ 
+     static void register_lite_internal_call(const char* name, ManagedMethodPointer func);
+     static ManagedMethodPointer get_lite_internal_call(const char* name);
+diff --git a/src/runtime/vm/intrinsics.cpp b/src/runtime/vm/intrinsics.cpp
+index fea24d2..ab2b68e 100644
+--- a/src/runtime/vm/intrinsics.cpp
++++ b/src/runtime/vm/intrinsics.cpp
+@@ -19,6 +19,14 @@ static utils::Vector<IntrinsicInvoker> g_intrinsicInvokerIdList;
+ static utils::HashMap<IntrinsicInvoker, uint16_t> g_intrinsicInvokerIdMap;
+ 
+ // Register an intrinsic function by name
++void Intrinsics::shutdown()
++{
++    g_intrinsicMap.clear();
++    g_newobjIntrinsicMap.clear();
++    g_intrinsicInvokerIdList.clear();
++    g_intrinsicInvokerIdMap.clear();
++}
++
+ void Intrinsics::register_intrinsic(const char* name, IntrinsicFunction func, IntrinsicInvoker invoker)
+ {
+     assert(g_intrinsicMap.find(name) == g_intrinsicMap.end() && "Intrinsic already registered");
+diff --git a/src/runtime/vm/intrinsics.h b/src/runtime/vm/intrinsics.h
+index 46a9227..a6bf1f1 100644
+--- a/src/runtime/vm/intrinsics.h
++++ b/src/runtime/vm/intrinsics.h
+@@ -44,6 +44,7 @@ class Intrinsics
+   public:
+     // Initialize intrinsics
+     static void initialize();
++    static void shutdown();
+ 
+     static void register_intrinsic(const char* name, IntrinsicFunction func, IntrinsicInvoker invoker);
+     static const IntrinsicRegistry* get_intrinsic(const char* name);
+diff --git a/src/runtime/vm/monitor.cpp b/src/runtime/vm/monitor.cpp
+index 793922a..b1c1457 100644
+--- a/src/runtime/vm/monitor.cpp
++++ b/src/runtime/vm/monitor.cpp
+@@ -74,5 +74,10 @@ bool Monitor::monitor_test_owner(RtObject* obj)
+     return it != g_monitor_count.end();
+ }
+ 
++void Monitor::shutdown()
++{
++    g_monitor_count.clear();
++}
++
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/monitor.h b/src/runtime/vm/monitor.h
+index 937af0e..5256575 100644
+--- a/src/runtime/vm/monitor.h
++++ b/src/runtime/vm/monitor.h
+@@ -19,6 +19,7 @@ class Monitor
+     static bool monitor_try_enter(RtObject* obj, int32_t timeout);
+     static void monitor_try_enter_with_atomic_var(RtObject* obj, int32_t timeout, bool* lock_taken);
+     static bool monitor_test_owner(RtObject* obj);
++    static void shutdown();
+ };
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/pinvoke.cpp b/src/runtime/vm/pinvoke.cpp
+index c2ae795..ac9c575 100644
+--- a/src/runtime/vm/pinvoke.cpp
++++ b/src/runtime/vm/pinvoke.cpp
+@@ -15,6 +15,11 @@ namespace vm
+ // Static maps for internal call functions
+ static utils::HashMap<const char*, PInvokeRegistry, utils::CStrHasher, utils::CStrCompare> g_internalcall_map;
+ 
++void PInvokes::shutdown()
++{
++    g_internalcall_map.clear();
++}
++
+ // Register an internal call function by name
+ void PInvokes::register_pinvoke(const char* name, PInvokeFunction func, PInvokeInvoker invoker)
+ {
+diff --git a/src/runtime/vm/pinvoke.h b/src/runtime/vm/pinvoke.h
+index d92350c..41555b8 100644
+--- a/src/runtime/vm/pinvoke.h
++++ b/src/runtime/vm/pinvoke.h
+@@ -37,6 +37,7 @@ class PInvokes
+   public:
+     // Initialize internal calls
+     static void initialize();
++    static void shutdown();
+ 
+     // Register/get internal call functions
+     static void register_pinvoke(const char* name, PInvokeFunction func, PInvokeInvoker invoker);
+diff --git a/src/runtime/vm/reflection.cpp b/src/runtime/vm/reflection.cpp
+index a8fed1e..397d18c 100644
+--- a/src/runtime/vm/reflection.cpp
++++ b/src/runtime/vm/reflection.cpp
+@@ -524,5 +524,18 @@ void register_reflection_gc_roots()
+     gc::GcRoots::register_visit_object_roots(visit_reflection_object_roots);
+ }
+ 
++void Reflection::shutdown()
++{
++    s_class_reflection_type_map.clear();
++    s_method_reflection_map.clear();
++    s_method_params_map.clear();
++    s_field_reflection_map.clear();
++    s_property_reflection_map.clear();
++    s_event_reflection_map.clear();
++    s_assembly_reflection_map.clear();
++    s_module_reflection_map.clear();
++    s_assembly_name_map.clear();
++}
++
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/reflection.h b/src/runtime/vm/reflection.h
+index 4d33b55..0b82507 100644
+--- a/src/runtime/vm/reflection.h
++++ b/src/runtime/vm/reflection.h
+@@ -20,6 +20,7 @@ class Reflection
+     static RtResult<metadata::RtMonoAssemblyName*> get_assembly_name_object(metadata::RtAssembly* ass);
+     static RtResult<RtReflectionModule*> get_module_reflection_object(metadata::RtModuleDef* mod);
+     static RtResult<RtObject*> invoke_method(const metadata::RtMethodInfo* method, RtObject* obj, RtArray* params, RtObject** out_ex);
++    static void shutdown();
+ };
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/rt_exception.cpp b/src/runtime/vm/rt_exception.cpp
+index 738d4b3..c1d0a29 100644
+--- a/src/runtime/vm/rt_exception.cpp
++++ b/src/runtime/vm/rt_exception.cpp
+@@ -26,6 +26,11 @@ void register_exception_gc_roots()
+     gc::GcRoots::register_slot(reinterpret_cast<RtObject**>(&s_ref_exception));
+ }
+ 
++void Exception::shutdown()
++{
++    s_ref_exception = nullptr;
++}
++
+ void Exception::set_current_exception(RtException* ex)
+ {
+     s_ref_exception = ex;
+diff --git a/src/runtime/vm/rt_exception.h b/src/runtime/vm/rt_exception.h
+index 13db4fe..2cb9202 100644
+--- a/src/runtime/vm/rt_exception.h
++++ b/src/runtime/vm/rt_exception.h
+@@ -21,6 +21,7 @@ class Exception
+ {
+   public:
+     static RtResultVoid initialize();
++    static void shutdown();
+     static void set_current_exception(RtException* ex);
+     static RtException* get_and_clear_current_exception();
+     static RtException* raise_error_as_exception(RtErr err, interp::InterpFrame* frame, const void* ip);
+diff --git a/src/runtime/vm/rt_string.cpp b/src/runtime/vm/rt_string.cpp
+index d8ab21b..61f1dbd 100644
+--- a/src/runtime/vm/rt_string.cpp
++++ b/src/runtime/vm/rt_string.cpp
+@@ -108,6 +108,14 @@ void register_string_gc_roots()
+ 
+ constexpr size_t OVER_SIZE_OF_STRING = 4;
+ 
++void String::shutdown()
++{
++    g_stringClass = nullptr;
++    g_empty_string = nullptr;
++    g_redirectedCtorMethod = nullptr;
++    g_internTable.clear();
++}
++
+ RtString* String::get_empty_string()
+ {
+     return g_empty_string;
+diff --git a/src/runtime/vm/rt_string.h b/src/runtime/vm/rt_string.h
+index f7476e6..6ba49da 100644
+--- a/src/runtime/vm/rt_string.h
++++ b/src/runtime/vm/rt_string.h
+@@ -11,6 +11,7 @@ class String
+ {
+   public:
+     static RtResultVoid initialize();
++    static void shutdown();
+     static RtString* get_empty_string();
+     static RtString* create_string_from_utf16chars(const Utf16Char* str, int32_t length);
+     static RtString* create_string_from_utf8chars(const char* str, int32_t length);
+diff --git a/src/runtime/vm/rt_thread.cpp b/src/runtime/vm/rt_thread.cpp
+index 84992e8..135c9d9 100644
+--- a/src/runtime/vm/rt_thread.cpp
++++ b/src/runtime/vm/rt_thread.cpp
+@@ -240,5 +240,12 @@ RtResult<vm::RtObject*> Thread::get_abort_exception_state()
+     RET_OK(nullptr);
+ }
+ 
++void Thread::shutdown()
++{
++    g_current_thread = nullptr;
++    g_priority = static_cast<int32_t>(ThreadPriority::Normal);
++    g_thread_id_counter = 0;
++}
++
+ } // namespace vm
+ } // namespace leanclr
+diff --git a/src/runtime/vm/rt_thread.h b/src/runtime/vm/rt_thread.h
+index 7a9bd34..ef80f0f 100644
+--- a/src/runtime/vm/rt_thread.h
++++ b/src/runtime/vm/rt_thread.h
+@@ -69,6 +69,7 @@ class Thread
+     static void abort(RtThread* thread);
+ 
+     static RtResult<vm::RtObject*> get_abort_exception_state();
++    static void shutdown();
+ };
+ 
+ } // namespace vm
+diff --git a/src/runtime/vm/runtime.cpp b/src/runtime/vm/runtime.cpp
+index 5ebd706..a4bbcd0 100644
+--- a/src/runtime/vm/runtime.cpp
++++ b/src/runtime/vm/runtime.cpp
+@@ -11,6 +11,9 @@
+ #include "array_class.h"
+ #include "rt_exception.h"
+ #include "delegate.h"
++#include "reflection.h"
++#include "monitor.h"
++#include "generic_method.h"
+ #include "rt_thread.h"
+ #include "appdomain.h"
+ #include "method.h"
+@@ -407,7 +410,34 @@ RtResultVoid Runtime::initialize()
+ 
+ void Runtime::shutdown()
+ {
+-    // todo: implement shutdown logic
++    Environment::shutdown();
++
++    AppDomain::shutdown();
++    Thread::shutdown();
++    Exception::shutdown();
++    String::shutdown();
++    ArrayClass::shutdown();
++    Class::shutdown();
++    Reflection::shutdown();
++    Monitor::shutdown();
++    GenericMethod::shutdown();
++    metadata::RtModuleDef::clear_modules();
++
++    // Release managed objects before the metadata pool they point into.
++    GC::shutdown();
++    metadata::MetadataCache::reset();
++    interp::MachineState::get_global_machine_state().reset();
++
++    PInvokes::shutdown();
++    InternalCalls::shutdown();
++    Intrinsics::shutdown();
++
++    Environment::reset();
++    alloc::MetadataAllocation::destroy();
++
++    // Settings holds strdup'ed global strings and its set_* functions only allow
++    // being called once; clearing them here keeps Runtime::initialize reusable.
++    Settings::shutdown();
+ }
+ 
+ RtResultVoid Runtime::run_class_static_constructor(const metadata::RtClass* klass)
+diff --git a/src/runtime/vm/settings.cpp b/src/runtime/vm/settings.cpp
+index 5c94497..3b9fafc 100644
+--- a/src/runtime/vm/settings.cpp
++++ b/src/runtime/vm/settings.cpp
+@@ -1,4 +1,5 @@
+ #include "settings.h"
++#include "alloc/general_allocation.h"
+ #include "utils/string_builder.h"
+ #include "utils/string_util.h"
+ 
+@@ -55,6 +56,37 @@ static void default_debugger_log_function(int32_t level, const uint16_t* categor
+     printf("%s\n", g_debugger_log_buffer.get_const_chars());
+ }
+ 
++static void free_settings_string(const char*& value)
++{
++    if (value != nullptr)
++    {
++        alloc::GeneralAllocation::free(const_cast<char*>(value));
++        value = nullptr;
++    }
++}
++
++void Settings::shutdown()
++{
++    free_settings_string(g_domain_name);
++    free_settings_string(g_config_dir);
++    free_settings_string(g_data_dir);
++    free_settings_string(g_temp_dir);
++    free_settings_string(g_config);
++
++    for (int32_t i = 0; i < g_commandline_arguments_count; ++i)
++    {
++        free_settings_string(g_commandline_arguments[i]);
++    }
++    g_commandline_arguments_count = 0;
++
++    g_file_loader = nullptr;
++    g_internal_functions_initializer = nullptr;
++    g_debugger_log_function = default_debugger_log_function;
++    g_report_unhandled_exception_function = nullptr;
++    g_aot_modules_data = nullptr;
++    g_gc_mode = gc::GCMode::ENABLED;
++}
++
+ const char* Settings::get_domain_name()
+ {
+     return g_domain_name;
+diff --git a/src/runtime/vm/settings.h b/src/runtime/vm/settings.h
+index 98829bc..d46c04c 100644
+--- a/src/runtime/vm/settings.h
++++ b/src/runtime/vm/settings.h
+@@ -26,6 +26,9 @@ typedef void (*ReportUnhandledExceptionFunc)(RtException* exception);
+ class Settings
+ {
+   public:
++    // Releases all global settings so Runtime can be initialized again.
++    static void shutdown();
++
+     static const char* get_domain_name();
+     static void set_domain_name(const char* domain_name);
+ 
