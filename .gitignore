@@ -18,3 +18,4 @@ demo_csharp/obj/
 demo_csharp/bin/
 demo_csharp/*.dll
 demo_csharp/*.pdb
+.trae/
