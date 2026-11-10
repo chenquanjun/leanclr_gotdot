@@ -1,0 +1,155 @@
+name: CI
+
+# 平台矩阵：
+#   windows / linux —— 构建 GDExtension + 跑 hotreload 与代码包 CLI 回归（命令与本机 scripts/*.ps1 完全一致）
+#   android（见 android.yml）—— 只做构建与导出；无设备，不跑设备测试
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows build + CLI regression
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Verify submodule pins
+        shell: pwsh
+        run: ./scripts/verify_submodules.ps1
+
+      - name: Cache native build
+        uses: actions/cache@v4
+        with:
+          path: out/build
+          key: ${{ runner.os }}-native-${{ hashFiles('CMakeLists.txt', 'patches/*.patch', 'native/src/**', '.gitmodules') }}
+          restore-keys: |
+            ${{ runner.os }}-native-
+
+      - name: Fetch Godot 4.5 (Windows console build)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $PWD '.tools/godot45'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'godot-win64.zip'
+          Invoke-WebRequest -Uri 'https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_win64.exe.zip' -OutFile $zip
+          tar.exe -xf $zip -C $dir
+          Get-ChildItem $dir -Recurse -Filter '*.exe' | Where-Object { $_.DirectoryName -ne $dir } | ForEach-Object { Move-Item -LiteralPath $_.FullName -Destination $dir -Force }
+          $console = Join-Path $dir 'Godot_v4.5-stable_win64_console.exe'
+          if (-not (Test-Path -LiteralPath $console)) { throw "Godot console build missing: $console" }
+          Get-ChildItem $dir | Select-Object Name
+
+      - name: Prepare dependencies (submodules + patches) and BCL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/ensure_deps.ps1
+          ./scripts/bootstrap_bcl.ps1
+
+      - name: Build native extension
+        shell: cmd
+        run: scripts\build_native.bat
+
+      - name: Import Godot project
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & './.tools/godot45/Godot_v4.5-stable_win64_console.exe' --headless --path godot_project --import
+          if ($LASTEXITCODE -ne 0) { throw "Godot import failed: $LASTEXITCODE" }
+
+      - name: Hot reload regression (CLI)
+        shell: pwsh
+        run: ./scripts/hotreload.ps1 -Channel cli
+
+      - name: Code package regression (CLI)
+        shell: pwsh
+        run: ./scripts/code_pkg_test.ps1 -Channel cli
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-logs
+          path: out/logs/
+          if-no-files-found: warn
+
+  linux:
+    name: Linux build + CLI regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Verify submodule pins
+        shell: pwsh
+        run: ./scripts/verify_submodules.ps1
+
+      - name: Cache native build
+        uses: actions/cache@v4
+        with:
+          path: out/build
+          key: ${{ runner.os }}-native-${{ hashFiles('CMakeLists.txt', 'patches/*.patch', 'native/src/**', '.gitmodules') }}
+          restore-keys: |
+            ${{ runner.os }}-native-
+
+      - name: Fetch Godot 4.5 (Linux headless build)
+        run: |
+          set -euo pipefail
+          mkdir -p .tools/godot45
+          curl -fsSL -o /tmp/godot-linux.zip https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip
+          unzip -q /tmp/godot-linux.zip -d .tools/godot45
+          godot_bin="$(find .tools/godot45 -maxdepth 2 -name 'Godot_v4.5-stable_linux.x86_64' | head -1)"
+          if [ -z "$godot_bin" ]; then echo "Godot Linux build missing" >&2; exit 1; fi
+          chmod +x "$godot_bin"
+          echo "GODOT=$PWD/$godot_bin" >> "$GITHUB_ENV"
+          "$PWD/$godot_bin" --version
+
+      - name: Prepare dependencies (submodules + patches) and BCL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/ensure_deps.ps1
+          ./scripts/bootstrap_bcl.ps1
+
+      - name: Build native extension
+        run: bash scripts/build_native_linux.sh
+
+      - name: Import Godot project
+        run: |
+          set -euo pipefail
+          "$GODOT" --headless --path godot_project --import
+
+      - name: Hot reload regression (CLI)
+        shell: pwsh
+        run: ./scripts/hotreload.ps1 -Channel cli -GodotExe $env:GODOT
+
+      - name: Code package regression (CLI)
+        shell: pwsh
+        run: ./scripts/code_pkg_test.ps1 -Channel cli -GodotExe $env:GODOT
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-logs
+          path: out/logs/
+          if-no-files-found: warn

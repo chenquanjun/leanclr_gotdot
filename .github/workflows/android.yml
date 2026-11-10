@@ -1,0 +1,128 @@
+name: Android build + export
+
+# 注意：
+#   - 无 Android 设备，本工作流只做「交叉编译 + APK 导出成功」，不做设备运行；真机/MuMu 验证见 docs/09。
+#   - 只在手动触发与 Android 相关改动时运行，避免每次 push 都下载导出模板（约 1GB）。
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native/**'
+      - 'CMakeLists.txt'
+      - 'patches/**'
+      - 'godot_project/bin/*.gdextension'
+      - 'godot_project/export_presets.cfg'
+      - 'scripts/build_android_linux.sh'
+      - '.github/workflows/android.yml'
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-export:
+    name: Build 3 ABIs + export debug APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Prepare dependencies and BCL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/ensure_deps.ps1
+          ./scripts/bootstrap_bcl.ps1
+
+      - name: Build managed assemblies
+        run: dotnet build demo_csharp/LeanClrGame.csproj -c Release -nologo -v:minimal
+
+      - name: Build native libs (x86_64 / arm64-v8a / armeabi-v7a, Debug)
+        run: |
+          set -euo pipefail
+          for abi in x86_64 arm64-v8a armeabi-v7a; do
+            bash scripts/build_android_linux.sh "$abi" Debug
+          done
+
+      - name: Fetch Godot 4.5 Linux build and export templates
+        run: |
+          set -euo pipefail
+          mkdir -p .tools/godot45
+          curl -fsSL -o /tmp/godot-linux.zip https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip
+          unzip -q /tmp/godot-linux.zip -d .tools/godot45
+          godot_bin="$(find .tools/godot45 -maxdepth 2 -name 'Godot_v4.5-stable_linux.x86_64' | head -1)"
+          if [ -z "$godot_bin" ]; then echo "Godot Linux build missing" >&2; exit 1; fi
+          chmod +x "$godot_bin"
+          echo "GODOT=$PWD/$godot_bin" >> "$GITHUB_ENV"
+
+          curl -fsSL -o /tmp/godot-templates.tpz https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_export_templates.tpz
+          tpl_root="$HOME/.local/share/godot/export_templates"
+          mkdir -p "$tpl_root" /tmp/godot-templates
+          unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
+          mv /tmp/godot-templates/templates "$tpl_root/4.5.stable"
+          ls "$tpl_root/4.5.stable" | head -20
+
+      - name: Configure debug keystore for export presets
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          if [[ ! -f "$HOME/.android/debug.keystore" ]]; then
+            keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          # 入库预设的 keystore 为空（不绑定本机路径），这里注入 runner 的路径（仅改动工作区副本）。
+          sed -i 's|^keystore/debug=.*|keystore/debug="'"$HOME"'/.android/debug.keystore"|' godot_project/export_presets.cfg
+          grep '^keystore/debug' godot_project/export_presets.cfg
+
+      - name: Point Godot editor settings at the Android SDK
+        run: |
+          set -euo pipefail
+          "$GODOT" --headless --editor --quit || true
+          settings="$(find "$HOME/.config/godot" -maxdepth 1 -name 'editor_settings-*.tres' | head -1)"
+          if [[ -z "$settings" ]]; then
+            echo "未生成 editor settings 文件，导出可能因 SDK 路径缺失失败" >&2
+          else
+            if grep -q '^export/android/android_sdk_path' "$settings"; then
+              sed -i 's|^export/android/android_sdk_path.*|export/android/android_sdk_path = "'"$ANDROID_HOME"'"|' "$settings"
+            else
+              sed -i '/^\[resource\]/a export/android/android_sdk_path = "'"$ANDROID_HOME"'"' "$settings"
+            fi
+            grep 'android_sdk_path' "$settings"
+          fi
+
+      - name: Export debug APKs
+        run: |
+          set -euo pipefail
+          mkdir -p out/android
+          name_for() {
+            case "$1" in
+              "Android x86_64") echo x86_64 ;;
+              "Android arm64-v8a") echo arm64-v8a ;;
+              "Android armeabi-v7a") echo armeabi-v7a ;;
+            esac
+          }
+          for preset in "Android x86_64" "Android arm64-v8a" "Android armeabi-v7a"; do
+            apk="out/android/leanclr_codepkg_$(name_for "$preset").apk"
+            echo "== export $preset -> $apk"
+            "$GODOT" --headless --path godot_project --export-debug "$preset" "$PWD/$apk"
+            ls -l "$apk"
+          done
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-artifacts
+          path: |
+            out/android/
+            out/bin/android/
+            out/logs/
+          if-no-files-found: warn
