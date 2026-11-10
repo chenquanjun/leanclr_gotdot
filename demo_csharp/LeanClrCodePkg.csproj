@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PkgVariant Condition="'$(PkgVariant)' == ''">v1</PkgVariant>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>LeanClrCodePkg</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputPath>../out/tmp/code_pkg/$(PkgVariant)</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+    <DefineConstants Condition="'$(PkgVariant)' == 'a'">PKG_A</DefineConstants>
+    <DefineConstants Condition="'$(PkgVariant)' == 'b'">PKG_B</DefineConstants>
+    <DefineConstants Condition="'$(PkgVariant)' == 'v2'">PKG_V2</DefineConstants>
+    <DefineConstants Condition="'$(PkgVariant)' == 'v3'">PKG_V3</DefineConstants>
+    <BaseIntermediateOutputPath>obj/codepkg_$(PkgVariant)/</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>obj/codepkg_$(PkgVariant)/</IntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="CodePkg.cs" />
+  </ItemGroup>
+</Project>
