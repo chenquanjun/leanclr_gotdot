@@ -1,0 +1,4 @@
+# 补丁与 Linux 脚本必须保持 LF：Windows 上 checkout 成 CRLF 会导致 git apply / bash 失败。
+*.patch text eol=lf
+*.sh text eol=lf
+.gitmodules text eol=lf

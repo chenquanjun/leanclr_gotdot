@@ -1,0 +1,20 @@
+# 编译、日志、导出与临时产物统一在 out/（见 README「目录结构」）
+out/
+.refs/
+.tools/
+godot_project/.godot/
+godot_project/bin/bcl/
+godot_project/bin/assemblies/
+godot_project/hotreload_tmp/
+godot_project/recovery_tmp/
+godot_project/game_demo_tmp/
+godot_project/bin/leanclr_godot.dll
+godot_project/bin/leanclr_godot.release.dll
+godot_project/bin/leanclr_godot.so
+godot_project/bin/leanclr_godot.release.so
+godot_project/bin/leanclr_godot.pdb
+godot_project/bin/android/
+demo_csharp/obj/
+demo_csharp/bin/
+demo_csharp/*.dll
+demo_csharp/*.pdb
