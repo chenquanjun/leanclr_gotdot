@@ -14,9 +14,11 @@ on:
       - 'scripts/build_native_ios.sh'
       - '.github/workflows/ios.yml'
 
+# 所有平台工作流共用 leanclr-ci 组，跨 workflow 串行（见 docs/11-ci.md §2）。
+# cancel-in-progress: false 表示不打断正在跑的构建；注意同组只保留 1 running + 1 pending。
 concurrency:
-  group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  group: leanclr-ci
+  cancel-in-progress: false
 
 jobs:
   ios:
