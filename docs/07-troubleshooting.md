@@ -13,7 +13,7 @@
 2. 确认 `godot_project/.godot/extension_list.cfg` 包含 `res://bin/leanclr_godot.gdextension`。
 3. 再普通运行。
 
-编辑器 headless 导入时报 `signal 11` 属已知现象，只要 `extension_list.cfg` 已生成即可。
+编辑器 headless 导入时报 `signal 11` 属已知现象，只要 `extension_list.cfg` 已生成即可。触发条件是「没有 `.godot` 的首次导入」，且崩溃发生在编辑器退出阶段，详见 `docs/11` §4.1。
 
 ## 2. GDExtension 加载失败 / 找不到 DLL
 

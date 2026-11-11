@@ -8,7 +8,7 @@ Godot 运行时只加载 `.godot/extension_list.cfg` 中登记的 GDExtension。
 "./.tools/godot45/Godot_v4.5-stable_win64_console.exe" --headless --editor --path godot_project --quit-after 60
 ```
 
-该命令可能以 `signal 11` 结束，但只要生成了 `godot_project/.godot/extension_list.cfg` 即可继续。之后普通运行不会再崩溃。
+该命令可能以 `signal 11` 结束，但只要生成了 `godot_project/.godot/extension_list.cfg` 即可继续。之后普通运行不会再崩溃。CI 的 `Import Godot project` 就按这个约定判定（校验清单后复跑一次要求 exit 0，见 `docs/11` §4.1）。
 
 判断扩展是否已登记：
 
