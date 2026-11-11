@@ -7,13 +7,15 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
-    <BaseIntermediateOutputPath>obj/cycle_b/</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>obj/cycle_b/</IntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)cycle_b/</IntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="LeanClrCycleB.cs" />
     <Reference Include="LeanClrCycleA">
       <HintPath>../godot_project/hotreload_tmp/cycle/v1/LeanClrCycleA.dll</HintPath>
+      <!-- 同上：B 只需要 A(v1) 的元数据，不复制、不展开其依赖。 -->
+      <Private>false</Private>
+      <FindDependencies>false</FindDependencies>
     </Reference>
   </ItemGroup>
 </Project>

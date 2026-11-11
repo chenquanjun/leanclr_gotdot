@@ -8,8 +8,7 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
     <DefineConstants Condition="'$(CycleStage)' == 'v2'">CYCLE_A_V2</DefineConstants>
-    <BaseIntermediateOutputPath>obj/cycle_$(CycleStage)/</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>obj/cycle_$(CycleStage)/</IntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)cycle_$(CycleStage)/</IntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="LeanClrCycleA.cs" />
@@ -17,6 +16,13 @@
   <ItemGroup Condition="'$(CycleStage)' == 'v2'">
     <Reference Include="LeanClrCycleB">
       <HintPath>../godot_project/hotreload_tmp/cycle/b/LeanClrCycleB.dll</HintPath>
+      <!-- 循环测试：A(v2) 与 B(v1) 互相引用是运行期才发生的加载顺序验证，
+           构建期只按 HintPath 取 B 的元数据即可。FindDependencies=false 阻止
+           RAR 顺着 B 的引用把 A(v1) 也解析进本次依赖集合（deps.json 会出现
+           两个 LeanClrCycleA 条目，SDK 10 直接抛重复键）；Private=false 避免
+           把无关副本复制到 A(v2) 的输出目录。 -->
+      <Private>false</Private>
+      <FindDependencies>false</FindDependencies>
     </Reference>
   </ItemGroup>
 </Project>
