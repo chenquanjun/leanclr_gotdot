@@ -76,3 +76,9 @@ public static extern void node_set_position(long instance_id, double x, double y
 - 必须使用完整 mono-4.5 BCL 目录；缺失 `Mono.Security.dll` 等会导致 `System.dll` 引用链加载失败。
 - 若使用 `dotnet build` 生成 netstandard2.0 程序集，必须把 `godot_project/bin/bcl/Facades/netstandard.dll` 复制到 `godot_project/bin/bcl/netstandard.dll`。
 - 优先使用系统 .NET Framework csc，生成的原生 .NET Framework 程序集与 mono-4.5 BCL 更匹配。
+
+## 8. SDK 版本与中间目录
+
+- 仓库根 `global.json` 固定 .NET SDK `10.0.100`（`rollForward: latestFeature`），因此本机必须是 10.0.x；只有 9.x 时 `dotnet build` 会直接报 `A compatible .NET SDK was not found`。成因与安装方式见 `docs/11-ci.md` §4.2。
+- `demo_csharp/*.csproj` 平铺在同一目录，默认会共享 `demo_csharp/obj/`。`BaseIntermediateOutputPath` 统一由 `demo_csharp/Directory.Build.props` 设为 `obj/$(MSBuildProjectName)/`，**不要写回单个 csproj**（会触发 MSB3539，并让所有项目继续共用一份 `project.assets.json`）；各项目只在自己的 csproj 里设 `IntermediateOutputPath = $(BaseIntermediateOutputPath)<变体>/`。
+- 用 `HintPath` 引用另一个测试程序集时（例如 `LeanClrCycleA` ↔ `LeanClrCycleB`），若被引用方又反过来引用当前程序集的旧输出，需要给该引用加 `<Private>false</Private>` 与 `<FindDependencies>false</FindDependencies>`，否则 SDK 10 会在 `GenerateDepsFile` 因同名条目抛 MSB4018。
