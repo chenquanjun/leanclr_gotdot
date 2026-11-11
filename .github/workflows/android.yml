@@ -3,6 +3,8 @@ name: Android build + export
 # 注意：
 #   - 无 Android 设备，本工作流只做「交叉编译 + APK 导出成功」，不做设备运行；真机/MuMu 验证见 docs/09。
 #   - 只在手动触发与 Android 相关改动时运行，避免每次 push 都下载导出模板（约 1GB）。
+#   - 每个 ABI 一个 matrix job（fail-fast: false）：各自构建自己的原生库、导出自己的 APK、上传自己的产物。
+#     单 job 只编译一个 ABI，避免三个 ABI 串在一个 job 里撞 120 分钟超时（见 docs/11-ci.md §2、§4）。
 on:
   workflow_dispatch:
   push:
@@ -20,10 +22,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-export:
-    name: Build 3 ABIs + export debug APKs
+  build-export:
+    name: ${{ matrix.abi }} build + export
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: x86_64
+            preset: Android x86_64
+          - abi: arm64-v8a
+            preset: Android arm64-v8a
+          - abi: armeabi-v7a
+            preset: Android armeabi-v7a
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,6 +44,34 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+
+      # CMake 缓存按 ABI 隔离：不同 ABI 的 build 目录（out/build/android/<abi>/）互不覆盖。
+      - name: Cache native build (${{ matrix.abi }})
+        uses: actions/cache@v4
+        with:
+          path: out/build
+          key: ${{ runner.os }}-android-native-${{ matrix.abi }}-${{ hashFiles('CMakeLists.txt', 'patches/*.patch', 'native/src/**', '.gitmodules') }}
+          restore-keys: |
+            ${{ runner.os }}-android-native-${{ matrix.abi }}-
+
+      # 下面三个缓存在三个 ABI job 之间共享同一 key：首个 job 落盘，其余 job 直接命中。
+      - name: Cache Godot 4.5 Linux build
+        uses: actions/cache@v4
+        with:
+          path: .tools/godot45
+          key: ${{ runner.os }}-godot45-4.5-stable
+
+      - name: Cache Godot 4.5 export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/godot/export_templates/4.5.stable
+          key: ${{ runner.os }}-godot45-templates-4.5-stable
+
+      - name: Cache BCL
+        uses: actions/cache@v4
+        with:
+          path: godot_project/bin/bcl
+          key: ${{ runner.os }}-bcl-${{ hashFiles('native/thirdparty/leanclr/src/libraries/mono-4.5/*.dll', 'native/thirdparty/leanclr/src/libraries/mono-4.5/Facades/netstandard.dll') }}
 
       - name: Prepare dependencies and BCL
         shell: pwsh
@@ -43,30 +83,37 @@ jobs:
       - name: Build managed assemblies
         run: dotnet build demo_csharp/LeanClrGame.csproj -c Release -nologo -v:minimal
 
-      - name: Build native libs (x86_64 / arm64-v8a / armeabi-v7a, Debug)
-        run: |
-          set -euo pipefail
-          for abi in x86_64 arm64-v8a armeabi-v7a; do
-            bash scripts/build_android_linux.sh "$abi" Debug
-          done
+      - name: Build native lib (${{ matrix.abi }}, Debug)
+        run: bash scripts/build_android_linux.sh "${{ matrix.abi }}" Debug
 
       - name: Fetch Godot 4.5 Linux build and export templates
         run: |
           set -euo pipefail
           mkdir -p .tools/godot45
-          curl -fsSL -o /tmp/godot-linux.zip https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip
-          unzip -q /tmp/godot-linux.zip -d .tools/godot45
-          godot_bin="$(find .tools/godot45 -maxdepth 2 -name 'Godot_v4.5-stable_linux.x86_64' | head -1)"
+          godot_bin="$(find .tools/godot45 -maxdepth 2 -name 'Godot_v4.5-stable_linux.x86_64' -print -quit)"
+          if [ -z "$godot_bin" ]; then
+            curl -fsSL -o /tmp/godot-linux.zip https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip
+            unzip -q /tmp/godot-linux.zip -d .tools/godot45
+            godot_bin="$(find .tools/godot45 -maxdepth 2 -name 'Godot_v4.5-stable_linux.x86_64' -print -quit)"
+          else
+            echo "Godot 二进制命中缓存：$godot_bin"
+          fi
           if [ -z "$godot_bin" ]; then echo "Godot Linux build missing" >&2; exit 1; fi
           chmod +x "$godot_bin"
           echo "GODOT=$PWD/$godot_bin" >> "$GITHUB_ENV"
+          "$PWD/$godot_bin" --version
 
-          curl -fsSL -o /tmp/godot-templates.tpz https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_export_templates.tpz
           tpl_root="$HOME/.local/share/godot/export_templates"
-          mkdir -p "$tpl_root" /tmp/godot-templates
-          unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
-          mv /tmp/godot-templates/templates "$tpl_root/4.5.stable"
-          ls "$tpl_root/4.5.stable" | head -20
+          if [ -f "$tpl_root/4.5.stable/android_debug.apk" ]; then
+            echo "导出模板命中缓存：$tpl_root/4.5.stable"
+          else
+            curl -fsSL -o /tmp/godot-templates.tpz https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_export_templates.tpz
+            mkdir -p "$tpl_root" /tmp/godot-templates
+            rm -rf /tmp/godot-templates/templates
+            unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
+            mv /tmp/godot-templates/templates "$tpl_root/4.5.stable"
+          fi
+          ls "$tpl_root/4.5.stable" | sed -n '1,20p'
 
       - name: Configure debug keystore for export presets
         run: |
@@ -86,7 +133,7 @@ jobs:
         run: |
           set -euo pipefail
           "$GODOT" --headless --editor --quit || true
-          settings="$(find "$HOME/.config/godot" -maxdepth 1 -name 'editor_settings-*.tres' | head -1)"
+          settings="$(find "$HOME/.config/godot" -maxdepth 1 -name 'editor_settings-*.tres' -print -quit || true)"
           if [[ -z "$settings" ]]; then
             echo "未生成 editor settings 文件，导出可能因 SDK 路径缺失失败" >&2
           else
@@ -98,31 +145,63 @@ jobs:
             grep 'android_sdk_path' "$settings"
           fi
 
-      - name: Export debug APKs
+      - name: Export debug APK (${{ matrix.abi }})
+        env:
+          ABI: ${{ matrix.abi }}
+          PRESET: ${{ matrix.preset }}
         run: |
           set -euo pipefail
           mkdir -p out/android
-          name_for() {
-            case "$1" in
-              "Android x86_64") echo x86_64 ;;
-              "Android arm64-v8a") echo arm64-v8a ;;
-              "Android armeabi-v7a") echo armeabi-v7a ;;
-            esac
-          }
-          for preset in "Android x86_64" "Android arm64-v8a" "Android armeabi-v7a"; do
-            apk="out/android/leanclr_codepkg_$(name_for "$preset").apk"
-            echo "== export $preset -> $apk"
-            "$GODOT" --headless --path godot_project --export-debug "$preset" "$PWD/$apk"
-            ls -l "$apk"
-          done
+          apk="out/android/leanclr_codepkg_${ABI}.apk"
+          echo "== export ${PRESET} -> $apk"
+          "$GODOT" --headless --path godot_project --export-debug "$PRESET" "$PWD/$apk"
+          ls -l "$apk"
 
-      - name: Upload artifacts
+      - name: Upload APK + native lib (${{ matrix.abi }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-${{ matrix.abi }}
+          path: |
+            out/android/*.apk
+            out/bin/android/${{ matrix.abi }}/
+          if-no-files-found: error
+
+      - name: Upload logs (${{ matrix.abi }})
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-artifacts
-          path: |
-            out/android/
-            out/bin/android/
-            out/logs/
+          name: android-logs-${{ matrix.abi }}
+          path: out/logs/
           if-no-files-found: warn
+
+  # 汇总：三个 ABI 全部结束（无论成败）后，把分片产物合成一个 artifact，并断言三份 APK 都在。
+  summary:
+    name: Collect APKs
+    needs: build-export
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: android-apk-*
+          path: out
+          merge-multiple: true
+
+      - name: Verify all three ABIs produced APKs
+        run: |
+          set -euo pipefail
+          ls -l out/android
+          for abi in x86_64 arm64-v8a armeabi-v7a; do
+            f="out/android/leanclr_codepkg_${abi}.apk"
+            if [[ ! -f "$f" ]]; then
+              echo "缺少 APK：$f" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload combined artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-artifacts
+          path: out/android/*.apk
+          if-no-files-found: error
