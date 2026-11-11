@@ -408,11 +408,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pck_export.ps1 -Incl
 
 | 工作流 | 平台 | 内容 |
 |---|---|---|
-| `.github/workflows/ci.yml` | Windows / Ubuntu | submodule 检出 → `ensure_deps` + `bootstrap_bcl` → 构建 GDExtension → `hotreload.ps1 -Channel cli`（56 项）与 `code_pkg_test.ps1 -Channel cli`（70 项） |
-| `.github/workflows/macos.yml` | macOS（arm64） | 构建 `.dylib`（`build_native_macos.sh`）→ 检查 `file`/`otool`/入口符号 → 同一组 CLI 回归 |
-| `.github/workflows/ios.yml` | macOS（arm64 交叉编译） | 构建 iOS 静态库 `libleanclr_godot.ios.debug.a` → `lipo`/符号检查 → 上传产物；不导出 `.ipa`、不签名 |
-| `.github/workflows/android.yml` | Ubuntu | 交叉编译 x86_64 / arm64-v8a / armeabi-v7a，导出 3 个 debug APK 并上传产物 |
+| `.github/workflows/ci.yml` | Windows | 第 1 段：submodule 检出 → `ensure_deps` + `bootstrap_bcl` → 构建 GDExtension → `hotreload.ps1 -Channel cli`（56 项）与 `code_pkg_test.ps1 -Channel cli`（70 项） |
+| `.github/workflows/linux.yml` | Ubuntu | 第 2 段：`build_native_linux.sh` → Godot `--import` → 同一组 CLI 回归 |
+| `.github/workflows/macos.yml` | macOS（arm64） | 第 3 段：构建 `.dylib`（`build_native_macos.sh`）→ 检查 `file`/`otool`/入口符号 → 同一组 CLI 回归 |
+| `.github/workflows/ios.yml` | macOS（arm64 交叉编译） | 第 4 段：构建 iOS 静态库 `libleanclr_godot.ios.debug.a` → `lipo`/符号检查 → 上传产物；不导出 `.ipa`、不签名 |
+| `.github/workflows/android.yml` | Ubuntu | 第 5 段：交叉编译 x86_64 / arm64-v8a / armeabi-v7a，导出 3 个 debug APK 并上传产物 |
 
+- 五段用 `workflow_run` 串成严格链（Windows → Linux → macOS → iOS → Android），上游 `conclusion` 不是 `success` 就不启动下一段；每段也都保留 `workflow_dispatch`，可从链中任意一段手动补跑。链条、`workflow_run` 约束与「首个反馈变慢」的代价见 [docs/11-ci.md](docs/11-ci.md) §2。
+- 只有默认分支（main）上的 run 才会往下触发链；feature 分支与 PR 只跑第 1 段 Windows。
 - 所有工作流都用 `submodules: recursive` 检出，并复用本机同一套脚本（`ensure_deps.ps1`、`build_native_linux.sh`、`build_native_macos.sh`、`build_native_ios.sh`、`build_android_linux.sh`）。
 - **submodule 只固定第三方来源，不能替代补丁**：`patches/leanclr-runtime-hotreload.patch` 必须在构建前应用，脚本已内置，冲突会失败而不是跳过。
 - **平台特性宏由 CMake 统一提供**：leanclr 内置 zlib 需要 `HAVE_UNISTD_H=1`（根 `CMakeLists.txt` 的 `if(UNIX)` 分支），否则 Linux/macOS 的 `gz*.c` 缺 `<unistd.h>`，GCC 14+ 会直接编译失败。
