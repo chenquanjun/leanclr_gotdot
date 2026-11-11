@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
       # CMake 缓存按 ABI 隔离：不同 ABI 的 build 目录（out/build/android/<abi>/）互不覆盖。
       - name: Cache native build (${{ matrix.abi }})
