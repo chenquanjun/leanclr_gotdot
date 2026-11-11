@@ -26,18 +26,30 @@ if(UNIX)
     target_compile_definitions(leanclr PRIVATE HAVE_UNISTD_H=1)
 endif()
 
-add_library(leanclr_godot SHARED
+# iOS 的 GDExtension 不加载动态库，而是在导出时由 Godot 把静态库链接进 Xcode 工程，
+# 因此这里产出 STATIC；其余平台维持 SHARED（.dll/.so/.dylib）。
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(LEANCLR_GODOT_LIBRARY_TYPE STATIC)
+else()
+    set(LEANCLR_GODOT_LIBRARY_TYPE SHARED)
+endif()
+
+add_library(leanclr_godot ${LEANCLR_GODOT_LIBRARY_TYPE}
     native/src/register_types.cpp
     native/src/leanclr_runtime.cpp
     native/src/leanclr_node.cpp
 )
 target_include_directories(leanclr_godot PRIVATE native/src)
 target_link_libraries(leanclr_godot PRIVATE godot::cpp leanclr)
-set_target_properties(leanclr_godot PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "leanclr_godot"
-)
+set_target_properties(leanclr_godot PROPERTIES OUTPUT_NAME "leanclr_godot")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # 动态库去掉 lib 前缀，保持 leanclr_godot.dll/.so/.dylib 的既有命名。
+    set_target_properties(leanclr_godot PROPERTIES PREFIX "")
+endif()
 
-add_executable(leanclr_smoke native/src/smoke_main.cpp)
-target_include_directories(leanclr_smoke PRIVATE native/src)
-target_link_libraries(leanclr_smoke PRIVATE leanclr)
+# leanclr_smoke 是可执行程序，iOS 目标没有可链接的宿主入口，只在桌面/服务器平台构建。
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(leanclr_smoke native/src/smoke_main.cpp)
+    target_include_directories(leanclr_smoke PRIVATE native/src)
+    target_link_libraries(leanclr_smoke PRIVATE leanclr)
+endif()

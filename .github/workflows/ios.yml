@@ -1,0 +1,84 @@
+name: iOS build
+
+# iOS（arm64 真机）静态库构建：只验证「能编译并归档出 .a」。
+# 导出 .ipa 需要 macOS Godot 编辑器 + Xcode 工程 + Apple 开发者证书与 provisioning profile，
+# 这里不伪造签名、也不跑设备/模拟器测试（见 docs/11-ci.md §4）。
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native/**'
+      - 'CMakeLists.txt'
+      - 'patches/**'
+      - 'godot_project/bin/*.gdextension'
+      - 'scripts/build_native_ios.sh'
+      - '.github/workflows/ios.yml'
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: iOS arm64 static library
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Verify submodule pins
+        shell: pwsh
+        run: ./scripts/verify_submodules.ps1
+
+      - name: Cache native build
+        uses: actions/cache@v4
+        with:
+          path: out/build
+          key: ${{ runner.os }}-${{ runner.arch }}-ios-native-${{ hashFiles('CMakeLists.txt', 'patches/*.patch', 'native/src/**', '.gitmodules') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-ios-native-
+
+      - name: Prepare dependencies (submodules + patches)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/ensure_deps.ps1
+
+      - name: Show Xcode / SDK versions
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build iOS static library (arm64, template_debug)
+        run: bash scripts/build_native_ios.sh Debug
+
+      - name: Verify static library
+        run: |
+          set -euo pipefail
+          lib=out/bin/ios/libleanclr_godot.ios.debug.a
+          file "$lib"
+          lipo -info "$lib"
+          ar -t "$lib" | sed -n '1,20p'
+          nm -gU "$lib" > /tmp/leanclr_ios.syms
+          if ! grep -q '_leanclr_godot_init' /tmp/leanclr_ios.syms; then
+            echo "缺少入口符号 leanclr_godot_init" >&2
+            exit 1
+          fi
+
+      - name: Upload static library
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-static-lib
+          path: out/bin/ios/*.a
+          if-no-files-found: error
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-logs
+          path: out/logs/
+          if-no-files-found: warn

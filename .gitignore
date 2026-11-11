@@ -14,6 +14,7 @@ godot_project/bin/leanclr_godot.so
 godot_project/bin/leanclr_godot.release.so
 godot_project/bin/leanclr_godot.dylib
 godot_project/bin/leanclr_godot.release.dylib
+godot_project/bin/ios/
 godot_project/bin/leanclr_godot.pdb
 godot_project/bin/android/
 demo_csharp/obj/

@@ -13,6 +13,9 @@ linux.release.x86_64 = "res://bin/leanclr_godot.release.so"
 ; macOS 用 dylib；当前脚本按宿主架构编译（CI 为 arm64），未构建 x86_64 变体。
 macos.debug.arm64 = "res://bin/leanclr_godot.dylib"
 macos.release.arm64 = "res://bin/leanclr_godot.release.dylib"
+; iOS 为静态库，导出时由 Godot 链接进 Xcode 工程；仅 arm64 真机，无模拟器变体。
+ios.debug = "res://bin/ios/libleanclr_godot.ios.debug.a"
+ios.release = "res://bin/ios/libleanclr_godot.ios.release.a"
 android.debug.x86_64 = "res://bin/android/x86_64/libleanclr_godot.so"
 android.release.x86_64 = "res://bin/android/x86_64/libleanclr_godot.release.so"
 android.debug.arm64-v8a = "res://bin/android/arm64-v8a/libleanclr_godot.so"
