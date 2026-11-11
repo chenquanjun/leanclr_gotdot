@@ -9,8 +9,7 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
     <DefineConstants Condition="'$(DemoVariant)' == 'v2'">DEMO_V2</DefineConstants>
-    <BaseIntermediateOutputPath>obj/demo_$(DemoVariant)/</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>obj/demo_$(DemoVariant)/</IntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)demo_$(DemoVariant)/</IntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="GameDemoTuning.cs" />

@@ -7,8 +7,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
-    <BaseIntermediateOutputPath>obj/ext2/</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>obj/ext2/</IntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)ext2/</IntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="LeanClrExt2.cs" />

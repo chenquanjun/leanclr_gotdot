@@ -7,8 +7,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
-    <BaseIntermediateOutputPath>obj/ext/</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>obj/ext/</IntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)ext/</IntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="LeanClrExt.cs" />

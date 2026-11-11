@@ -12,8 +12,7 @@
     <DefineConstants Condition="'$(PkgVariant)' == 'b'">PKG_B</DefineConstants>
     <DefineConstants Condition="'$(PkgVariant)' == 'v2'">PKG_V2</DefineConstants>
     <DefineConstants Condition="'$(PkgVariant)' == 'v3'">PKG_V3</DefineConstants>
-    <BaseIntermediateOutputPath>obj/codepkg_$(PkgVariant)/</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>obj/codepkg_$(PkgVariant)/</IntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)codepkg_$(PkgVariant)/</IntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="CodePkg.cs" />

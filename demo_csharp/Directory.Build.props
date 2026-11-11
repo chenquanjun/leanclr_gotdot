@@ -1,0 +1,11 @@
+<Project>
+  <!-- 所有 csproj 都平铺在 demo_csharp/ 下：默认的 obj/ 会被全部项目共享，
+       NuGet 的 MSBuildProjectExtensionsPath / project.assets.json 因此互相覆盖，
+       SDK 10 上表现为 GenerateDepsFile 的重复键（MSB4018）。
+       BaseIntermediateOutputPath 必须在 Microsoft.Common.props 之前设置，
+       写在 csproj 里会触发 MSB3539，所以统一放在这里，并按项目名分目录。
+       IntermediateOutputPath 仍由各 csproj 按变体（v1/v2/b/hot…）单独指定。 -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

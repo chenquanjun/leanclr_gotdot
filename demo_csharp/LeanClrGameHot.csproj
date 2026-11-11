@@ -8,8 +8,7 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
     <DefineConstants>HOT_V2</DefineConstants>
-    <BaseIntermediateOutputPath>obj/hot/</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>obj/hot/</IntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)hot/</IntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="LeanClrGame.cs" />
