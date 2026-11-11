@@ -30,7 +30,7 @@
 
 ```text
 leanclr_gotdot/
-├─ .github/workflows/      GitHub Actions（Windows/Linux 回归、Android 构建导出）
+├─ .github/workflows/      GitHub Actions（Windows/Linux/macOS 回归、iOS 静态库、Android 构建导出）
 ├─ .gitmodules             thirdparty 依赖固定到具体 commit
 ├─ patches/                leanclr 热更补丁（构建前必须应用）
 ├─ native/                 GDExtension 源码（src）与 submodule 依赖（thirdparty）
@@ -401,7 +401,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pck_export.ps1 -Incl
 - 卸载依赖两轮 GC；应用层仍持有未注册的原生指针指向旧模块时属于未定义行为。
 - 实例映射只覆盖 `LeanCLRNode` 与显式绑定对象，且为强引用；不再需要时应解绑或释放 Godot 实例。
 - 单线程模型：不能在 C# 侧跨线程回调 Godot。
-- 纯解释执行，无 AOT；macOS 尚未验证。Android 代码包热更新在 MuMu 12（x86_64）上以 x86_64 / armeabi-v7a / arm64-v8a 三种包验证通过，其中 arm 包走 MuMu 的 houdini 转译层；真实 arm 设备尚未验证。
+- 纯解释执行，无 AOT；macOS 已纳入 CI（构建 + headless 回归），iOS 只构建静态库，两者都未做真机验证。Android 代码包热更新在 MuMu 12（x86_64）上以 x86_64 / armeabi-v7a / arm64-v8a 三种包验证通过，其中 arm 包走 MuMu 的 houdini 转译层；真实 arm 设备尚未验证。
 - 代码包热更新按「整包替换 + `reload_runtime()`」生效：切换瞬间会重建 VM，旧句柄全部失效；不支持增量补丁、签名校验与断点续传。
 
 ## CI（GitHub Actions）
@@ -409,10 +409,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pck_export.ps1 -Incl
 | 工作流 | 平台 | 内容 |
 |---|---|---|
 | `.github/workflows/ci.yml` | Windows / Ubuntu | submodule 检出 → `ensure_deps` + `bootstrap_bcl` → 构建 GDExtension → `hotreload.ps1 -Channel cli`（56 项）与 `code_pkg_test.ps1 -Channel cli`（70 项） |
+| `.github/workflows/macos.yml` | macOS（arm64） | 构建 `.dylib`（`build_native_macos.sh`）→ 检查 `file`/`otool`/入口符号 → 同一组 CLI 回归 |
+| `.github/workflows/ios.yml` | macOS（arm64 交叉编译） | 构建 iOS 静态库 `libleanclr_godot.ios.debug.a` → `lipo`/符号检查 → 上传产物；不导出 `.ipa`、不签名 |
 | `.github/workflows/android.yml` | Ubuntu | 交叉编译 x86_64 / arm64-v8a / armeabi-v7a，导出 3 个 debug APK 并上传产物 |
 
-- 两个工作流都用 `submodules: recursive` 检出，并复用本机同一套脚本（`ensure_deps.ps1`、`build_native_linux.sh`、`build_android_linux.sh`）。
+- 所有工作流都用 `submodules: recursive` 检出，并复用本机同一套脚本（`ensure_deps.ps1`、`build_native_linux.sh`、`build_native_macos.sh`、`build_native_ios.sh`、`build_android_linux.sh`）。
 - **submodule 只固定第三方来源，不能替代补丁**：`patches/leanclr-runtime-hotreload.patch` 必须在构建前应用，脚本已内置，冲突会失败而不是跳过。
+- **平台特性宏由 CMake 统一提供**：leanclr 内置 zlib 需要 `HAVE_UNISTD_H=1`（根 `CMakeLists.txt` 的 `if(UNIX)` 分支），否则 Linux/macOS 的 `gz*.c` 缺 `<unistd.h>`，GCC 14+ 会直接编译失败。
+- 各平台验到的层级：Windows 构建 + 导出 + 回归；Linux 构建 + 导出已验、headless 回归待 runner 首跑；macOS 构建 + headless 回归（首次运行前视为未验证）；iOS 只到静态库产物；Android 构建 + 导出、无设备测试。
 - CI 不跑 MCP 通道（依赖未入库的 godot-mcp），也不做 Android 设备测试；设备侧证据仍以 MuMu 实测为准。
 - 本地如何预演、缓存策略、未实跑部分与已知限制见 `docs/11-ci.md`。
 
