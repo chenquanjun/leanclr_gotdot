@@ -17,6 +17,15 @@ add_subdirectory(native/thirdparty/godot-cpp godot-cpp)
 set(BUILD_SHARED_LEANCLR OFF CACHE BOOL "" FORCE)
 add_subdirectory(native/thirdparty/leanclr/src/runtime leanclr_runtime)
 
+# leanclr 内置的 3rd/zlib 由上游 ./configure 定义 HAVE_UNISTD_H；这里直接 GLOB 编译
+# 其 .c 文件，构建系统不会自动定义。缺失时 zlib 的 gzguts.h/zconf.h 不会包含
+# <unistd.h>，gzlib.c/gzread.c/gzwrite.c 里的 read/write/close/lseek 变成隐式声明
+# （GCC 14+ 默认 -Werror=implicit-function-declaration，Linux CI 直接编译失败）。
+# Windows 走 <io.h> 分支，所以只在 UNIX（Linux/macOS/iOS/Android）上补这个特性宏。
+if(UNIX)
+    target_compile_definitions(leanclr PRIVATE HAVE_UNISTD_H=1)
+endif()
+
 add_library(leanclr_godot SHARED
     native/src/register_types.cpp
     native/src/leanclr_runtime.cpp
