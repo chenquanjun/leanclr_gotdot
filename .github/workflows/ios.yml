@@ -1,33 +1,26 @@
 name: iOS build
 
+# 链式 CI 第 4 段：只在第 3 段 macOS CI 成功后启动（见 docs/11-ci.md §2.1）。
 # iOS（arm64 真机）静态库构建：只验证「能编译并归档出 .a」。
 # 导出 .ipa 需要 macOS Godot 编辑器 + Xcode 工程 + Apple 开发者证书与 provisioning profile，
 # 这里不伪造签名、也不跑设备/模拟器测试（见 docs/11-ci.md §4）。
 on:
+  workflow_run:
+    workflows: ["macOS CI"]
+    types: [completed]
   workflow_dispatch:
-  push:
-    paths:
-      - 'native/**'
-      - 'CMakeLists.txt'
-      - 'patches/**'
-      - 'godot_project/bin/*.gdextension'
-      - 'scripts/build_native_ios.sh'
-      - '.github/workflows/ios.yml'
-
-# 所有平台工作流共用 leanclr-ci 组，跨 workflow 串行（见 docs/11-ci.md §2）。
-# cancel-in-progress: false 表示不打断正在跑的构建；注意同组只保留 1 running + 1 pending。
-concurrency:
-  group: leanclr-ci
-  cancel-in-progress: false
 
 jobs:
   ios:
     name: iOS arm64 static library
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
+          # workflow_run 默认检出默认分支 HEAD，这里显式检出触发链的提交。
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           submodules: recursive
 
       - name: Verify submodule pins

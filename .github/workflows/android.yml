@@ -1,31 +1,19 @@
 name: Android build + export
 
+# 链式 CI 第 5 段：只在第 4 段 iOS build 成功后启动（见 docs/11-ci.md §2.1）。
 # 注意：
 #   - 无 Android 设备，本工作流只做「交叉编译 + APK 导出成功」，不做设备运行；真机/MuMu 验证见 docs/09。
-#   - 只在手动触发与 Android 相关改动时运行，避免每次 push 都下载导出模板（约 1GB）。
 #   - 每个 ABI 一个 matrix job（fail-fast: false）：各自构建自己的原生库、导出自己的 APK、上传自己的产物。
-#     单 job 只编译一个 ABI，避免三个 ABI 串在一个 job 里撞 120 分钟超时（见 docs/11-ci.md §2、§4）。
 on:
+  workflow_run:
+    workflows: ["iOS build"]
+    types: [completed]
   workflow_dispatch:
-  push:
-    paths:
-      - 'native/**'
-      - 'CMakeLists.txt'
-      - 'patches/**'
-      - 'godot_project/bin/*.gdextension'
-      - 'godot_project/export_presets.cfg'
-      - 'scripts/build_android_linux.sh'
-      - '.github/workflows/android.yml'
-
-# 所有平台工作流共用 leanclr-ci 组，跨 workflow 串行（见 docs/11-ci.md §2）。
-# cancel-in-progress: false 表示不打断正在跑的构建；注意同组只保留 1 running + 1 pending。
-concurrency:
-  group: leanclr-ci
-  cancel-in-progress: false
 
 jobs:
   build-export:
     name: ${{ matrix.abi }} build + export
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -41,6 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # workflow_run 默认检出默认分支 HEAD，这里显式检出触发链的提交。
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           submodules: recursive
 
       - uses: actions/setup-dotnet@v4
@@ -176,11 +166,12 @@ jobs:
           path: out/logs/
           if-no-files-found: warn
 
-  # 汇总：三个 ABI 全部结束（无论成败）后，把分片产物合成一个 artifact，并断言三份 APK 都在。
+  # 汇总：仅在三个 ABI 全部成功时执行，把分片产物合成一个 artifact，并断言三份 APK 都在。
+  # 任一 ABI 失败就不进入汇总，整个 run 保持 failed，链停在 Android 这一段。
   summary:
     name: Collect APKs
     needs: build-export
-    if: always()
+    if: needs.build-export.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

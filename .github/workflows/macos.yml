@@ -1,26 +1,25 @@
 name: macOS CI
 
+# 链式 CI 第 3 段：只在第 2 段 Linux CI 成功后启动（见 docs/11-ci.md §2.1）。
 # macOS（arm64）构建 GDExtension，并跑与 Windows/Linux 相同的 CLI 回归。
 # 不做 .app 导出、不签名/公证：那部分仍属未验证范围（见 docs/11-ci.md §4）。
 on:
-  push:
-  pull_request:
+  workflow_run:
+    workflows: ["Linux CI"]
+    types: [completed]
   workflow_dispatch:
-
-# 所有平台工作流共用 leanclr-ci 组，跨 workflow 串行（见 docs/11-ci.md §2）。
-# cancel-in-progress: false 表示不打断正在跑的构建；注意同组只保留 1 running + 1 pending。
-concurrency:
-  group: leanclr-ci
-  cancel-in-progress: false
 
 jobs:
   macos:
     name: macOS arm64 build + CLI regression
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
+          # workflow_run 默认检出默认分支 HEAD，这里显式检出触发链的提交。
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           submodules: recursive
 
       - uses: actions/setup-dotnet@v4

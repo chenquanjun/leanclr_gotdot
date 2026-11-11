@@ -1,18 +1,12 @@
 name: CI
 
-# 平台矩阵：
-#   windows / linux —— 构建 GDExtension + 跑 hotreload 与代码包 CLI 回归（命令与本机 scripts/*.ps1 完全一致）
-#   android（见 android.yml）—— 只做构建与导出；无设备，不跑设备测试
+# 链式 CI 第 1 段：Windows。后续平台依次是 linux.yml → macos.yml → ios.yml → android.yml。
+# 每段只在上一段 success 后启动，失败/取消/跳过即停链；链条与手动补跑见 docs/11-ci.md §2.1。
+# push 对所有分支生效，但只有默认分支（main）的 run 完成才会触发下一段；PR 与非 main 分支只跑本段。
 on:
   push:
   pull_request:
   workflow_dispatch:
-
-# 所有平台工作流共用 leanclr-ci 组，跨 workflow 串行（见 docs/11-ci.md §2）。
-# cancel-in-progress: false 表示不打断正在跑的构建；注意同组只保留 1 running + 1 pending。
-concurrency:
-  group: leanclr-ci
-  cancel-in-progress: false
 
 jobs:
   windows:
@@ -85,73 +79,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-logs
-          path: out/logs/
-          if-no-files-found: warn
-
-  linux:
-    name: Linux build + CLI regression
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Verify submodule pins
-        shell: pwsh
-        run: ./scripts/verify_submodules.ps1
-
-      - name: Cache native build
-        uses: actions/cache@v4
-        with:
-          path: out/build
-          key: ${{ runner.os }}-native-${{ hashFiles('CMakeLists.txt', 'patches/*.patch', 'native/src/**', '.gitmodules') }}
-          restore-keys: |
-            ${{ runner.os }}-native-
-
-      - name: Fetch Godot 4.5 (Linux headless build)
-        run: |
-          set -euo pipefail
-          mkdir -p .tools/godot45
-          curl -fsSL -o /tmp/godot-linux.zip https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip
-          unzip -q /tmp/godot-linux.zip -d .tools/godot45
-          godot_bin="$(find .tools/godot45 -maxdepth 2 -name 'Godot_v4.5-stable_linux.x86_64' | head -1)"
-          if [ -z "$godot_bin" ]; then echo "Godot Linux build missing" >&2; exit 1; fi
-          chmod +x "$godot_bin"
-          echo "GODOT=$PWD/$godot_bin" >> "$GITHUB_ENV"
-          "$PWD/$godot_bin" --version
-
-      - name: Prepare dependencies (submodules + patches) and BCL
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          ./scripts/ensure_deps.ps1
-          ./scripts/bootstrap_bcl.ps1
-
-      - name: Build native extension
-        run: bash scripts/build_native_linux.sh
-
-      - name: Import Godot project
-        run: |
-          set -euo pipefail
-          "$GODOT" --headless --path godot_project --import
-
-      - name: Hot reload regression (CLI)
-        shell: pwsh
-        run: ./scripts/hotreload.ps1 -Channel cli -GodotExe $env:GODOT
-
-      - name: Code package regression (CLI)
-        shell: pwsh
-        run: ./scripts/code_pkg_test.ps1 -Channel cli -GodotExe $env:GODOT
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-logs
           path: out/logs/
           if-no-files-found: warn
