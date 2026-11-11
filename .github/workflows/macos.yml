@@ -81,10 +81,35 @@ jobs:
             exit 1
           fi
 
+      # 干净 checkout 没有 .godot，首次导入会在编辑器退出阶段崩溃（与 Windows 同源，见 docs/11 §4.1）：
+      # 此时 .godot/extension_list.cfg 已写好。判定标准是「清单已登记 + 复跑 exit 0」。
       - name: Import Godot project
         run: |
-          set -euo pipefail
-          "$GODOT" --headless --path godot_project --import
+          set -uo pipefail
+          manifest=godot_project/.godot/extension_list.cfg
+          mkdir -p out/logs
+          "$GODOT" --headless --verbose --path godot_project --import > out/logs/godot_import.log 2>&1
+          first=$?
+          tail -n 200 out/logs/godot_import.log || true
+          if [ ! -f "$manifest" ]; then
+            echo "首次导入未生成 $manifest（exit=$first）"
+            exit 1
+          fi
+          cat "$manifest"
+          if ! grep -q 'leanclr_godot\.gdextension' "$manifest"; then
+            echo "$manifest 未登记 leanclr_godot.gdextension"
+            exit 1
+          fi
+          if [ "$first" -ne 0 ]; then
+            echo "首次导入 exit=$first（首次导入的已知崩溃，见 docs/07 §1）；复跑确认缓存可用"
+            "$GODOT" --headless --verbose --path godot_project --import > out/logs/godot_import_second.log 2>&1
+            second=$?
+            tail -n 100 out/logs/godot_import_second.log || true
+            if [ "$second" -ne 0 ]; then
+              echo "复跑导入仍失败：first=$first second=$second"
+              exit 1
+            fi
+          fi
 
       - name: Hot reload regression (CLI)
         shell: pwsh

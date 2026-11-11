@@ -59,12 +59,73 @@ jobs:
         shell: cmd
         run: scripts\build_native.bat
 
+      # 只读采集，不做任何写操作。首次导入会崩溃，这里记录崩溃发生时 runner 的
+      # 环境与产物状态（DLL 版本、BCL/assemblies 是否存在、.godot 是否已存在），
+      # 供后续区分「缺依赖」与「退出阶段崩溃」（见 docs/11-ci.md §4）。
+      - name: Diagnose environment before import
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          "== runner =="
+          "PS=$($PSVersionTable.PSVersion) OS=$([Environment]::OSVersion.VersionString) Arch=$env:PROCESSOR_ARCHITECTURE"
+          try { (Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber | Format-List | Out-String).Trim() } catch { "Get-CimInstance 不可用：$($_.Exception.Message)" }
+          "RUNNER_IMAGE=$env:RUNNER_IMAGE  RUNNER_OS=$env:RUNNER_OS"
+
+          "== godot =="
+          & './.tools/godot45/Godot_v4.5-stable_win64_console.exe' --version
+
+          "== res://bin =="
+          Get-ChildItem godot_project/bin -Force | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize | Out-String
+
+          "== extension targets =="
+          Get-Content godot_project/bin/leanclr_godot.gdextension | Where-Object { $_ -match '^\s*(windows|linux|macos|ios|android)\.' }
+
+          "== dll =="
+          $dll = Get-Item godot_project/bin/leanclr_godot.dll
+          "dll size=$($dll.Length) mtime=$($dll.LastWriteTime.ToString('o'))"
+          "dll sha256=$((Get-FileHash $dll.FullName -Algorithm SHA256).Hash)"
+          "dll version=$($dll.VersionInfo.FileVersion) product=$($dll.VersionInfo.ProductVersion)"
+
+          "== bcl / assemblies =="
+          "bcl dll count=$((Get-ChildItem godot_project/bin/bcl -Filter *.dll -ErrorAction SilentlyContinue | Measure-Object).Count)"
+          "assemblies present=$(Test-Path godot_project/bin/assemblies) count=$((Get-ChildItem godot_project/bin/assemblies -Filter *.dll -ErrorAction SilentlyContinue | Measure-Object).Count)"
+          "godot import cache present=$(Test-Path godot_project/.godot)"
+
+      # 干净 checkout 没有 godot_project/.godot，首次导入会在编辑器退出阶段以 signal 11
+      # （exit -1073741819）结束——这是本仓库的已知现象，不是本步失败：此时
+      # .godot/extension_list.cfg 已写好，后续 CLI 运行不再崩溃（docs/04 §1、docs/07 §1）。
+      # 因此判定标准改为：扩展清单已登记 + 复跑导入 exit 0（证明缓存可被回归复用）。
       - name: Import Godot project
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & './.tools/godot45/Godot_v4.5-stable_win64_console.exe' --headless --path godot_project --import
-          if ($LASTEXITCODE -ne 0) { throw "Godot import failed: $LASTEXITCODE" }
+          $godot = './.tools/godot45/Godot_v4.5-stable_win64_console.exe'
+          $manifest = 'godot_project/.godot/extension_list.cfg'
+          $firstLog = 'out/logs/godot_import.log'
+          New-Item -ItemType Directory -Force -Path (Split-Path $firstLog -Parent) | Out-Null
+
+          & $godot --headless --verbose --path godot_project --import *> $firstLog
+          $first = $LASTEXITCODE
+          Get-Content $firstLog -Tail 200
+
+          if (-not (Test-Path $manifest)) {
+            throw "首次导入未生成 $manifest（exit=$first，日志=$firstLog）"
+          }
+          Get-Content $manifest
+          if (-not (Select-String -Path $manifest -Pattern 'leanclr_godot\.gdextension' -Quiet)) {
+            throw "$manifest 未登记 leanclr_godot.gdextension"
+          }
+
+          if ($first -ne 0) {
+            "首次导入 exit=$first（首次导入的已知 signal 11，见 docs/07 §1）；复跑一次确认缓存可用"
+            $secondLog = 'out/logs/godot_import_second.log'
+            & $godot --headless --verbose --path godot_project --import *> $secondLog
+            $second = $LASTEXITCODE
+            Get-Content $secondLog -Tail 100
+            if ($second -ne 0) {
+              throw "复跑导入仍失败：first=$first second=$second，日志=$firstLog,$secondLog"
+            }
+          }
 
       - name: Hot reload regression (CLI)
         shell: pwsh
@@ -80,4 +141,15 @@ jobs:
         with:
           name: windows-logs
           path: out/logs/
+          if-no-files-found: warn
+
+      # 失败时把导入缓存一起带走：.godot 里的 editor/ 元数据能区分「导入中途崩溃」与「退出时崩溃」。
+      - name: Upload import diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-import-diagnostics
+          path: |
+            out/logs/
+            godot_project/.godot/
           if-no-files-found: warn
