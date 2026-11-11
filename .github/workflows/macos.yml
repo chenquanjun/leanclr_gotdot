@@ -1,0 +1,102 @@
+name: macOS CI
+
+# macOS（arm64）构建 GDExtension，并跑与 Windows/Linux 相同的 CLI 回归。
+# 不做 .app 导出、不签名/公证：那部分仍属未验证范围（见 docs/11-ci.md §4）。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS arm64 build + CLI regression
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Verify submodule pins
+        shell: pwsh
+        run: ./scripts/verify_submodules.ps1
+
+      - name: Cache native build
+        uses: actions/cache@v4
+        with:
+          path: out/build
+          key: ${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('CMakeLists.txt', 'patches/*.patch', 'native/src/**', '.gitmodules') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-native-
+
+      - name: Fetch Godot 4.5 (macOS universal)
+        run: |
+          set -euo pipefail
+          mkdir -p .tools/godot45
+          curl -fsSL -o /tmp/godot-macos.zip https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_macos.universal.zip
+          unzip -q /tmp/godot-macos.zip -d .tools/godot45
+          godot_bin="$PWD/.tools/godot45/Godot.app/Contents/MacOS/Godot"
+          if [ ! -f "$godot_bin" ]; then
+            echo "Godot macOS build missing: $godot_bin" >&2
+            exit 1
+          fi
+          chmod +x "$godot_bin"
+          echo "GODOT=$godot_bin" >> "$GITHUB_ENV"
+          "$godot_bin" --version
+
+      - name: Prepare dependencies (submodules + patches) and BCL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/ensure_deps.ps1
+          ./scripts/bootstrap_bcl.ps1
+
+      - name: Build native extension
+        run: |
+          set -euo pipefail
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "本工作流按 .gdextension 的 macos.*.arm64 配置，需要 arm64 runner（当前 $(uname -m)）" >&2
+            exit 1
+          fi
+          bash scripts/build_native_macos.sh
+
+      - name: Verify dylib (arch, linkage, entry symbol)
+        run: |
+          set -euo pipefail
+          lib=out/bin/macos/leanclr_godot.dylib
+          file "$lib"
+          otool -L "$lib"
+          nm -gU "$lib" > /tmp/leanclr_godot.syms
+          if ! grep -q '_leanclr_godot_init' /tmp/leanclr_godot.syms; then
+            echo "缺少入口符号 leanclr_godot_init" >&2
+            exit 1
+          fi
+
+      - name: Import Godot project
+        run: |
+          set -euo pipefail
+          "$GODOT" --headless --path godot_project --import
+
+      - name: Hot reload regression (CLI)
+        shell: pwsh
+        run: ./scripts/hotreload.ps1 -Channel cli -GodotExe $env:GODOT
+
+      - name: Code package regression (CLI)
+        shell: pwsh
+        run: ./scripts/code_pkg_test.ps1 -Channel cli -GodotExe $env:GODOT
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-logs
+          path: out/logs/
+          if-no-files-found: warn
