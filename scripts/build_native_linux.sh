@@ -24,7 +24,12 @@ mkdir -p "$build_dir" "$bin_dir" "$root/out/logs"
 cmake -S "$root" -B "$build_dir" \
     -DCMAKE_BUILD_TYPE=Release \
     -DGODOTCPP_TARGET=template_debug
-cmake --build "$build_dir" --target leanclr_godot --parallel
+
+# GitHub-hosted Linux runners are memory-constrained while compiling the generated
+# godot-cpp sources. Limiting build parallelism avoids runner shutdowns in CI.
+: "${CMAKE_BUILD_PARALLEL_LEVEL:=2}"
+export CMAKE_BUILD_PARALLEL_LEVEL
+cmake --build "$build_dir" --target leanclr_godot --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
 
 cp "$build_dir/leanclr_godot.so" "$bin_dir/leanclr_godot.so"
 
