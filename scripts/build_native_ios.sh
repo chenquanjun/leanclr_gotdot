@@ -61,7 +61,12 @@ cmake -S "$root" -B "$build_dir" \
     -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
     -DCMAKE_BUILD_TYPE="$config" \
     -DGODOTCPP_TARGET="$template"
-cmake --build "$build_dir" --target leanclr_godot --parallel
+
+# GitHub-hosted Linux runners are memory-constrained while compiling the generated
+# godot-cpp sources. Limiting build parallelism avoids runner shutdowns in CI.
+: "${CMAKE_BUILD_PARALLEL_LEVEL:=2}"
+export CMAKE_BUILD_PARALLEL_LEVEL
+cmake --build "$build_dir" --target leanclr_godot --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
 
 archive="$build_dir/libleanclr_godot.a"
 if [[ ! -f "$archive" ]]; then
