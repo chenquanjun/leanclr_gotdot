@@ -47,6 +47,11 @@ if [[ "$config_arg" != "Both" ]]; then
     configs=("$config_arg")
 fi
 
+# GitHub-hosted Linux runners are memory-constrained while compiling the generated
+# godot-cpp sources. Limiting build parallelism avoids runner shutdowns in CI.
+: "${CMAKE_BUILD_PARALLEL_LEVEL:=2}"
+export CMAKE_BUILD_PARALLEL_LEVEL
+
 for config in "${configs[@]}"; do
     label="$(printf '%s' "$config" | tr '[:upper:]' '[:lower:]')"
     if [[ "$config" == "Debug" ]]; then
@@ -69,7 +74,7 @@ for config in "${configs[@]}"; do
         -DGODOTCPP_TARGET="$template" 2>&1 | tee "$log"
 
     echo "[$abi][$config] build leanclr_godot"
-    cmake --build "$build_dir" --target leanclr_godot --parallel 2>&1 | tee -a "$log"
+    cmake --build "$build_dir" --target leanclr_godot --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" 2>&1 | tee -a "$log"
 
     if [[ ! -f "$build_dir/leanclr_godot.so" ]]; then
         echo "[$abi][$config] 未生成 $build_dir/leanclr_godot.so" >&2
